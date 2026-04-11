@@ -1,15 +1,15 @@
 import type { PaperclipPluginManifestV1 } from "@paperclipai/plugin-sdk";
 
-const PLUGIN_ID = "paperclip.web-search-example";
+const PLUGIN_ID = "web-search";
 const PLUGIN_VERSION = "0.1.0";
 
 const manifest: PaperclipPluginManifestV1 = {
   id: PLUGIN_ID,
   apiVersion: 1,
   version: PLUGIN_VERSION,
-  displayName: "Web Search (Example)",
-  description: "Reference plugin that provides web search and web crawling capabilities to Paperclip agents. Includes web-search (find articles) and web-crawl (read full content) tools.",
-  author: "Paperclip",
+  displayName: "Web Search",
+  description: "Web search and article extraction plugin for Paperclip agents. Includes web-search (find articles) and web-crawl (extract readable text) tools. Supports Tavily and Google Custom Search APIs.",
+  author: "@bbugs280",
   categories: ["automation"],
   capabilities: [
     "agent.tools.register",

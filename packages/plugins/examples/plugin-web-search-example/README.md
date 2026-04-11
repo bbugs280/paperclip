@@ -1,6 +1,8 @@
-# Web Search Plugin (Example)
+# Web Search Plugin
 
-A reference Paperclip plugin that provides `web-search` and `web-crawl` tools to agents.
+A Paperclip plugin that provides `web-search` and `web-crawl` tools to agents.
+
+Published as: [@bbugs280/plugin-web-search-example](https://www.npmjs.com/package/@bbugs280/plugin-web-search-example)
 
 - **web-search**: Search the web and get relevant results with titles, URLs, and snippets
 - **web-crawl**: Fetch a URL and extract full readable article content (strips HTML/scripts)

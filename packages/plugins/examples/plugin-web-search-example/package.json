@@ -1,9 +1,11 @@
 {
-  "name": "@paperclipai/plugin-web-search-example",
+  "name": "@bbugs280/plugin-web-search-example",
   "version": "0.1.0",
-  "description": "Reference plugin that provides web search capability to Paperclip agents",
+  "description": "Web search and web crawling plugin for Paperclip agents. Supports Tavily and Google Custom Search APIs.",
   "type": "module",
-  "private": true,
+  "publishConfig": {
+    "access": "public"
+  },
   "exports": {
     ".": "./src/index.ts"
   },
