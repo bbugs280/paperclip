@@ -64,6 +64,12 @@ const manifest: PaperclipPluginManifestV1 = {
         description: "Secret reference for Tavily API key (e.g., tavily_api_key)",
         default: "tavily_api_key",
       },
+      xApiKeyRef: {
+        type: "string",
+        title: "X API Bearer Token Reference",
+        description: "Secret reference for the X.com (Twitter) API bearer token",
+        default: "x_api_bearer_token",
+      },
       googleApiKeyRef: {
         type: "string",
         title: "Google API Key Reference",

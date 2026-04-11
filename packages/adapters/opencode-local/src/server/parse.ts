@@ -61,12 +61,8 @@ export function parseOpenCodeJsonl(stdout: string) {
     }
 
     if (type === "tool_use") {
-      const part = parseObject(event.part);
-      const state = parseObject(part.state);
-      if (asString(state.status, "") === "error") {
-        const text = asString(state.error, "").trim();
-        if (text) errors.push(text);
-      }
+      // Individual tool-call errors are recoverable — the LLM can handle them and continue.
+      // Do not treat them as run-level failures; only fatal "error" events fail the run.
       continue;
     }
 

@@ -1683,6 +1683,7 @@ function PromptsTab({
   const queryClient = useQueryClient();
   const { selectedCompanyId } = useCompany();
   const { isMobile } = useSidebar();
+  const { pushToast } = useToast();
   const [selectedFile, setSelectedFile] = useState<string>("AGENTS.md");
   const [showFilePanel, setShowFilePanel] = useState(false);
   const [draft, setDraft] = useState<string | null>(null);
@@ -1783,7 +1784,10 @@ function PromptsTab({
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
     },
-    onError: () => setAwaitingRefresh(false),
+    onError: (err) => {
+      setAwaitingRefresh(false);
+      pushToast({ tone: "error", title: "Failed to save", body: err instanceof Error ? err.message : "Could not update instructions bundle" });
+    },
   });
 
   const saveFile = useMutation({
@@ -1797,7 +1801,10 @@ function PromptsTab({
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.id) });
       queryClient.invalidateQueries({ queryKey: queryKeys.agents.detail(agent.urlKey) });
     },
-    onError: () => setAwaitingRefresh(false),
+    onError: (err) => {
+      setAwaitingRefresh(false);
+      pushToast({ tone: "error", title: "Failed to save file", body: err instanceof Error ? err.message : "Could not save instructions file" });
+    },
   });
 
   const deleteFile = useMutation({
