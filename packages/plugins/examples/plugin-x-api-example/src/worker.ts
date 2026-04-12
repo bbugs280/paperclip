@@ -520,12 +520,18 @@ async function deleteTweet(
 }
 
 async function registerToolHandlers(ctx: PluginContext): Promise<void> {
-  const config = await getConfig(ctx);
-  const bearerToken = await ctx.secrets.resolve(config.bearerTokenRef);
-  const accessToken = await ctx.secrets.resolve(config.accessTokenRef);
+  // Secrets are resolved lazily inside each handler so the plugin
+  // can install and start without requiring secrets to be pre-configured.
 
-  // For tools that need userId, we'll need to get it from somewhere
-  // For now, we'll fetch it dynamically when needed or require it as a param
+  async function getBearerToken(): Promise<string | null> {
+    const config = await getConfig(ctx);
+    return await ctx.secrets.resolve(config.bearerTokenRef).catch(() => null);
+  }
+
+  async function getAccessToken(): Promise<string | null> {
+    const config = await getConfig(ctx);
+    return await ctx.secrets.resolve(config.accessTokenRef).catch(() => null);
+  }
 
   // x-search
   ctx.tools.register(
@@ -543,12 +549,13 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const bearerToken = await getBearerToken();
       if (!bearerToken) {
-        return { error: "Bearer token not configured" };
+        return { error: "Bearer token not configured (set x_bearer_token secret)" };
       }
       const p = params as Record<string, unknown>;
       const query = p.query as string;
-      const maxResults = Math.max(1, Math.min((p.maxResults as number) ?? 10, 100));
+      const maxResults = Math.max(1, Math.min(((p.maxResults as number) ?? 10), 100));
       return await searchTweets(ctx, query, maxResults, bearerToken);
     },
   );
@@ -568,8 +575,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const bearerToken = await getBearerToken();
       if (!bearerToken) {
-        return { error: "Bearer token not configured" };
+        return { error: "Bearer token not configured (set x_bearer_token secret)" };
       }
       const p = params as Record<string, unknown>;
       return await getUser(ctx, p.username as string, bearerToken);
@@ -592,12 +600,13 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const bearerToken = await getBearerToken();
       if (!bearerToken) {
-        return { error: "Bearer token not configured" };
+        return { error: "Bearer token not configured (set x_bearer_token secret)" };
       }
       const p = params as Record<string, unknown>;
       const username = p.username as string;
-      const maxResults = Math.max(1, Math.min((p.maxResults as number) ?? 10, 100));
+      const maxResults = Math.max(1, Math.min(((p.maxResults as number) ?? 10), 100));
       return await getUserTimeline(ctx, username, maxResults, bearerToken);
     },
   );
@@ -618,8 +627,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
       if (!accessToken) {
-        return { error: "Access token not configured (write operations require authentication)" };
+        return { error: "Access token not configured (set x_access_token secret)" };
       }
       const p = params as Record<string, unknown>;
       const text = p.text as string;
@@ -643,12 +653,11 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      if (!accessToken || !bearerToken) {
-        return { error: "Tokens not configured for write operations" };
+      const accessToken = await getAccessToken();
+      if (!accessToken) {
+        return { error: "Access token not configured (set x_access_token secret)" };
       }
       const p = params as Record<string, unknown>;
-      // Get user ID from authenticated token context (simplified approach)
-      // In production, you'd cache this after the first auth call
       return { error: "User ID resolution needed (implement via token introspection)" };
     },
   );
@@ -668,8 +677,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
       if (!accessToken) {
-        return { error: "Access token not configured" };
+        return { error: "Access token not configured (set x_access_token secret)" };
       }
       return { error: "User ID resolution needed (implement via token introspection)" };
     },
@@ -690,8 +700,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
       if (!accessToken) {
-        return { error: "Access token not configured" };
+        return { error: "Access token not configured (set x_access_token secret)" };
       }
       return { error: "User ID resolution needed (implement via token introspection)" };
     },
@@ -712,8 +723,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
       if (!accessToken) {
-        return { error: "Access token not configured" };
+        return { error: "Access token not configured (set x_access_token secret)" };
       }
       return { error: "User ID resolution needed (implement via token introspection)" };
     },
@@ -734,6 +746,8 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
+      const bearerToken = await getBearerToken();
       if (!accessToken || !bearerToken) {
         return { error: "Tokens not configured for write operations" };
       }
@@ -756,6 +770,8 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
+      const bearerToken = await getBearerToken();
       if (!accessToken || !bearerToken) {
         return { error: "Tokens not configured for write operations" };
       }
@@ -778,8 +794,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
+      const accessToken = await getAccessToken();
       if (!accessToken) {
-        return { error: "Access token not configured" };
+        return { error: "Access token not configured (set x_access_token secret)" };
       }
       const p = params as Record<string, unknown>;
       return await deleteTweet(ctx, p.tweetId as string, accessToken);
