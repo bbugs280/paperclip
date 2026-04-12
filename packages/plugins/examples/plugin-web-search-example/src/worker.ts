@@ -8,10 +8,12 @@ import {
 const PLUGIN_NAME = "web-search-example";
 const TOOL_NAME_SEARCH = "web-search";
 const TOOL_NAME_CRAWL = "web-crawl";
+const TOOL_NAME_X = "x-search";
 
 interface WebSearchConfig {
   provider: "tavily" | "google";
   tavilyApiKeyRef: string;
+  xApiKeyRef: string;
   googleApiKeyRef: string;
   googleEngineIdRef: string;
   maxResults: number;
@@ -20,6 +22,7 @@ interface WebSearchConfig {
 const DEFAULT_CONFIG: WebSearchConfig = {
   provider: "tavily",
   tavilyApiKeyRef: "tavily_api_key",
+  xApiKeyRef: "x_api_bearer_token",
   googleApiKeyRef: "google_search_api_key",
   googleEngineIdRef: "google_search_engine_id",
   maxResults: 5,
@@ -306,6 +309,115 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       }
 
       return await crawlUrl(ctx, url);
+    },
+  );
+
+  // Register x-search tool (X.com / Twitter)
+  ctx.tools.register(
+    TOOL_NAME_X,
+    {
+      displayName: "X Search",
+      description:
+        "Search X.com (Twitter) recent tweets or fetch tweets from a username. Uses configured X API bearer token.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query for recent tweets" },
+          username: { type: "string", description: "Optional username to fetch tweets from instead of a free-text query" },
+          maxResults: { type: "number", description: "Maximum number of tweets to return (1-100)" },
+        },
+      },
+    },
+    async (params: unknown, _runCtx): Promise<ToolResult> => {
+      const payload = params as Record<string, unknown>;
+      const query = (payload.query as string | undefined) ?? "";
+      const username = (payload.username as string | undefined) ?? null;
+      const requestedMax = (payload.maxResults as number | undefined) ?? undefined;
+
+      const config = await getConfig(ctx);
+      const maxResults = Math.max(1, Math.min(requestedMax ?? config.maxResults, 100));
+      const apiKeyRef = config.xApiKeyRef ?? "x_api_bearer_token";
+
+      const token = await ctx.secrets.resolve(apiKeyRef);
+      if (!token) {
+        return { error: "X API bearer token not configured (resolve secret ref)" };
+      }
+
+      const headers = {
+        Authorization: `Bearer ${token}`,
+        "Content-Type": "application/json",
+      };
+
+      try {
+        // If username provided, fetch user id then their tweets
+        if (username) {
+          const userResp = await ctx.http.fetch(`https://api.twitter.com/2/users/by/username/${encodeURIComponent(username)}?user.fields=profile_image_url,username`, {
+            method: "GET",
+            headers,
+          });
+
+          if (!userResp.ok) {
+            return { error: `Failed to resolve username ${username}: HTTP ${userResp.status}` };
+          }
+
+          const userData = await userResp.json();
+          const userId = (userData && userData.data && userData.data.id) || null;
+          if (!userId) {
+            return { error: `Username not found: ${username}` };
+          }
+
+          const tweetsUrl = new URL(`https://api.twitter.com/2/users/${userId}/tweets`);
+          tweetsUrl.searchParams.set("max_results", String(Math.min(maxResults, 100)));
+          tweetsUrl.searchParams.set("tweet.fields", "created_at,author_id,public_metrics");
+
+          const tweetsResp = await ctx.http.fetch(tweetsUrl.toString(), { method: "GET", headers });
+          if (!tweetsResp.ok) {
+            return { error: `Failed to fetch tweets for ${username}: HTTP ${tweetsResp.status}` };
+          }
+
+          const tweetsData = await tweetsResp.json();
+          const tweets = (tweetsData && tweetsData.data) || [];
+
+          const content = (tweets as any[])
+            .map((t, i) => `${i + 1}. ${t.text}\nhttps://x.com/i/web/status/${t.id}\n${t.created_at ?? ""}`)
+            .join("\n\n");
+
+          return {
+            content: content || `No tweets found for user ${username}`,
+            data: { mode: "username", username, resultCount: tweets.length, tweets },
+          };
+        }
+
+        // Otherwise perform a recent search query
+        if (!query || query.trim().length === 0) {
+          return { error: "Either `query` or `username` must be provided" };
+        }
+
+        const searchUrl = new URL("https://api.twitter.com/2/tweets/search/recent");
+        searchUrl.searchParams.set("query", query);
+        searchUrl.searchParams.set("max_results", String(Math.min(maxResults, 100)));
+        searchUrl.searchParams.set("tweet.fields", "created_at,author_id,public_metrics");
+
+        const resp = await ctx.http.fetch(searchUrl.toString(), { method: "GET", headers });
+        if (!resp.ok) {
+          return { error: `X search failed: HTTP ${resp.status}` };
+        }
+
+        const data = await resp.json();
+        const tweets = (data && data.data) || [];
+
+        const content = (tweets as any[])
+          .map((t, i) => `${i + 1}. ${t.text}\nhttps://x.com/i/web/status/${t.id}\n${t.created_at ?? ""}`)
+          .join("\n\n");
+
+        return {
+          content: content || `No results for query: "${query}"`,
+          data: { mode: "search", query, resultCount: tweets.length, tweets },
+        };
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        return { error: `X search failed: ${message}` };
+      }
     },
   );
 }

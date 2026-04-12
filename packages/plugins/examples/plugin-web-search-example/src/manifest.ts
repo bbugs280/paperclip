@@ -47,6 +47,20 @@ const manifest: PaperclipPluginManifestV1 = {
         required: ["url"],
       },
     },
+    {
+      name: "x-search",
+      displayName: "X Search",
+      description: "Search X.com (Twitter) recent tweets or fetch tweets from a username. Uses configured X API bearer token.",
+      parametersSchema: {
+        type: "object",
+        properties: {
+          query: { type: "string", description: "Search query for recent tweets" },
+          username: { type: "string", description: "Optional username to fetch tweets from instead of a free-text query" },
+          maxResults: { type: "number", description: "Maximum number of tweets to return" },
+        },
+        required: [],
+      },
+    },
   ],
   instanceConfigSchema: {
     type: "object",
