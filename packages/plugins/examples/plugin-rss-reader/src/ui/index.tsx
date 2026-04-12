@@ -12,8 +12,8 @@ export default function RssReaderPluginUI() {
         </li>
         <li>
           <strong>rss-reader:fetch-finance-feeds</strong> — Fetch a curated
-          bundle of financial/market news feeds (Reuters, Bloomberg, CNBC, FT,
-          SCMP, Seeking Alpha, Investopedia) in parallel, merged and sorted
+          bundle of financial/market news feeds (MarketWatch, Bloomberg, CNBC, FT,
+          SCMP, Seeking Alpha, Nikkei Asia) in parallel, merged and sorted
           newest-first
         </li>
       </ul>

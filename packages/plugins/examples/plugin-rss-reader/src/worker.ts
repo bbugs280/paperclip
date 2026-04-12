@@ -7,8 +7,8 @@ import type { PluginContext, ToolResult } from "@paperclipai/plugin-sdk";
 
 const FINANCE_FEEDS: Array<{ name: string; url: string }> = [
   {
-    name: "Reuters Business",
-    url: "https://feeds.reuters.com/reuters/businessNews",
+    name: "MarketWatch",
+    url: "https://feeds.content.dowjones.io/public/rss/mw_topstories",
   },
   {
     name: "CNBC Top News",
@@ -24,15 +24,15 @@ const FINANCE_FEEDS: Array<{ name: string; url: string }> = [
   },
   {
     name: "SCMP Business",
-    url: "https://www.scmp.com/rss/91/feed",
+    url: "https://www.scmp.com/rss/91/feed/",
   },
   {
     name: "Seeking Alpha",
     url: "https://seekingalpha.com/feed.xml",
   },
   {
-    name: "Investopedia",
-    url: "https://www.investopedia.com/feedbuilder/feed/getfeed/?feedName=rss_articles",
+    name: "Nikkei Asia",
+    url: "https://asia.nikkei.com/rss/feed/nar",
   },
 ];
 
@@ -134,7 +134,7 @@ async function fetchFeedUrl(
 ): Promise<{ items: FeedItem[]; error?: string }> {
   let resp: Awaited<ReturnType<PluginContext["http"]["fetch"]>>;
   try {
-    resp = await ctx.http.fetch(url, { method: "GET", headers: FETCH_HEADERS });
+    resp = await ctx.http.fetch(url, { method: "GET", headers: FETCH_HEADERS, redirect: "follow" });
   } catch (err) {
     return { items: [], error: `Network error: ${String(err)}` };
   }
@@ -295,7 +295,7 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     {
       displayName: "Fetch Finance News Feeds",
       description:
-        "Fetch a curated bundle of financial/market news RSS feeds (Reuters, Bloomberg, CNBC, FT, SCMP, Seeking Alpha, Investopedia) in parallel. Returns items merged and sorted newest-first.",
+        "Fetch a curated bundle of financial/market news RSS feeds (MarketWatch, Bloomberg, CNBC, FT, SCMP, Seeking Alpha, Nikkei Asia) in parallel. Returns items merged and sorted newest-first.",
       parametersSchema: {
         type: "object",
         properties: {
