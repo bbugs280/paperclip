@@ -1,6 +1,6 @@
 {
   "name": "@bbugs280/plugin-x-api",
-  "version": "0.1.1",
+  "version": "0.1.2",
   "description": "Comprehensive X.com (Twitter) API plugin for Paperclip agents. Supports tweets, likes, retweets, follows, user info, timeline, and search.",
   "type": "module",
   "publishConfig": {
@@ -21,7 +21,7 @@
     "typecheck": "pnpm --filter @paperclipai/plugin-sdk build && tsc --noEmit"
   },
   "dependencies": {
-    "@paperclipai/plugin-sdk": "workspace:*"
+    "@paperclipai/plugin-sdk": "^1.0.0"
   },
   "devDependencies": {
     "@types/node": "^24.6.0",
