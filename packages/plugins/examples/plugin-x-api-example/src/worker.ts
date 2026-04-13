@@ -4,17 +4,30 @@ import {
   type PluginContext,
   type ToolResult,
 } from "@paperclipai/plugin-sdk";
+import { createHmac } from "node:crypto";
 
 const PLUGIN_NAME = "x-api";
 
 interface XApiConfig {
   bearerTokenRef: string;
+  consumerKeyRef: string;
+  consumerSecretRef: string;
   accessTokenRef: string;
   accessTokenSecretRef: string;
 }
 
+interface XApiCreds {
+  consumerKey: string | null;
+  consumerSecret: string | null;
+  accessToken: string | null;
+  accessTokenSecret: string | null;
+  bearerToken?: string | null;
+}
+
 const DEFAULT_CONFIG: XApiConfig = {
   bearerTokenRef: "x_bearer_token",
+  consumerKeyRef: "x_consumer_key",
+  consumerSecretRef: "x_consumer_secret",
   accessTokenRef: "x_access_token",
   accessTokenSecretRef: "x_access_token_secret",
 };
@@ -28,13 +41,111 @@ async function getConfig(ctx: PluginContext): Promise<XApiConfig> {
 }
 
 /**
+ * Build an OAuth 1.0a Authorization header with HMAC-SHA1 signing.
+ * Suitable for X API v2 endpoints using OAuth 1.0a user context.
+ * For JSON-body requests the body is NOT included in the signature
+ * (only URL-encoded form bodies are signed per the spec).
+ */
+function buildOAuth1Header(
+  method: string,
+  url: string,
+  consumerKey: string,
+  consumerSecret: string,
+  accessToken: string,
+  accessTokenSecret: string,
+  extraParams: Record<string, string> = {},
+): string {
+  const pct = (s: string | number) =>
+    encodeURIComponent(String(s)).replace(
+      /[!'()*]/g,
+      (c) => `%${c.charCodeAt(0).toString(16).toUpperCase()}`,
+    );
+
+  const nonce =
+    Math.random().toString(36).slice(2) + Math.random().toString(36).slice(2);
+  const timestamp = Math.floor(Date.now() / 1000).toString();
+
+  const oauthParams: Record<string, string> = {
+    oauth_consumer_key: consumerKey,
+    oauth_nonce: nonce,
+    oauth_signature_method: "HMAC-SHA1",
+    oauth_timestamp: timestamp,
+    oauth_token: accessToken,
+    oauth_version: "1.0",
+    ...extraParams,
+  };
+
+  // Parse URL to separate base URL from query params
+  const urlObj = new URL(url);
+  const baseUrl = `${urlObj.protocol}//${urlObj.host}${urlObj.pathname}`;
+
+  const allParams: Record<string, string> = { ...oauthParams };
+  for (const [k, v] of urlObj.searchParams.entries()) {
+    allParams[k] = v;
+  }
+
+  // Sort and encode parameter string
+  const paramStr = Object.keys(allParams)
+    .sort()
+    .map((k) => `${pct(k)}=${pct(allParams[k])}`)
+    .join("&");
+
+  const baseString = `${method.toUpperCase()}&${pct(baseUrl)}&${pct(paramStr)}`;
+  const signingKey = `${pct(consumerSecret)}&${pct(accessTokenSecret)}`;
+  const signature = createHmac("sha1", signingKey)
+    .update(baseString)
+    .digest("base64");
+
+  oauthParams.oauth_signature = signature;
+
+  const headerValue =
+    "OAuth " +
+    Object.keys(oauthParams)
+      .filter((k) => k.startsWith("oauth_"))
+      .sort()
+      .map((k) => `${pct(k)}="${pct(oauthParams[k])}"`)
+      .join(", ");
+
+  return headerValue;
+}
+
+/**
+ * Build an auth header for read (GET) operations given resolved credentials.
+ * Prefers OAuth 1.0a when all 4 creds present; falls back to Bearer token.
+ * Must be called AFTER URL query params are fully set so they're in the signature.
+ */
+function makeReadAuthHeader(
+  method: string,
+  url: string,
+  creds: XApiCreds,
+): string | null {
+  if (
+    creds.consumerKey &&
+    creds.consumerSecret &&
+    creds.accessToken &&
+    creds.accessTokenSecret
+  ) {
+    return buildOAuth1Header(
+      method,
+      url,
+      creds.consumerKey,
+      creds.consumerSecret,
+      creds.accessToken,
+      creds.accessTokenSecret,
+    );
+  }
+  if (creds.bearerToken) return `Bearer ${creds.bearerToken}`;
+  return null;
+}
+
+/**
  * Search recent tweets on X
  */
 async function searchTweets(
   ctx: PluginContext,
   query: string,
   maxResults: number,
-  bearerToken: string,
+  creds: XApiCreds,
 ): Promise<ToolResult> {
   try {
     const url = new URL("https://api.twitter.com/2/tweets/search/recent");
@@ -44,9 +155,31 @@ async function searchTweets(
     url.searchParams.set("expansions", "author_id");
     url.searchParams.set("user.fields", "username,name");
 
+    // Build auth header AFTER all query params are set so they're included in OAuth signature
+    let authHeader: string;
+    if (
+      creds.consumerKey &&
+      creds.consumerSecret &&
+      creds.accessToken &&
+      creds.accessTokenSecret
+    ) {
+      authHeader = buildOAuth1Header(
+        "GET",
+        url.toString(),
+        creds.consumerKey,
+        creds.consumerSecret,
+        creds.accessToken,
+        creds.accessTokenSecret,
+      );
+    } else if (creds.bearerToken) {
+      authHeader = `Bearer ${creds.bearerToken}`;
+    } else {
+      return { error: "No auth configured" };
+    }
+
     const resp = await ctx.http.fetch(url.toString(), {
       method: "GET",
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: { Authorization: authHeader },
     });
 
     if (!resp.ok) {
@@ -83,15 +216,37 @@ async function searchTweets(
 async function getUser(
   ctx: PluginContext,
   username: string,
-  bearerToken: string,
+  creds: XApiCreds,
 ): Promise<ToolResult> {
   try {
     const url = new URL(`https://api.twitter.com/2/users/by/username/${encodeURIComponent(username)}`);
     url.searchParams.set("user.fields", "created_at,description,location,public_metrics,verified");
 
+    // Build auth header AFTER all query params are set
+    let authHeader: string;
+    if (
+      creds.consumerKey &&
+      creds.consumerSecret &&
+      creds.accessToken &&
+      creds.accessTokenSecret
+    ) {
+      authHeader = buildOAuth1Header(
+        "GET",
+        url.toString(),
+        creds.consumerKey,
+        creds.consumerSecret,
+        creds.accessToken,
+        creds.accessTokenSecret,
+      );
+    } else if (creds.bearerToken) {
+      authHeader = `Bearer ${creds.bearerToken}`;
+    } else {
+      return { error: "No auth configured" };
+    }
+
     const resp = await ctx.http.fetch(url.toString(), {
       method: "GET",
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: { Authorization: authHeader },
     });
 
     if (!resp.ok) {
@@ -137,14 +292,17 @@ async function getUserTimeline(
   ctx: PluginContext,
   username: string,
   maxResults: number,
-  bearerToken: string,
+  creds: XApiCreds,
 ): Promise<ToolResult> {
   try {
     // First get user ID
     const userUrl = new URL(`https://api.twitter.com/2/users/by/username/${encodeURIComponent(username)}`);
+    const userAuthHeader = makeReadAuthHeader("GET", userUrl.toString(), creds);
+    if (!userAuthHeader) return { error: "No auth configured" };
+
     const userResp = await ctx.http.fetch(userUrl.toString(), {
       method: "GET",
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: { Authorization: userAuthHeader },
     });
 
     if (!userResp.ok) {
@@ -158,14 +316,17 @@ async function getUserTimeline(
       return { error: `Could not resolve user ${username}` };
     }
 
-    // Get timeline
+    // Get timeline — build new auth header with timeline URL (userId changes the URL)
     const timelineUrl = new URL(`https://api.twitter.com/2/users/${userId}/tweets`);
     timelineUrl.searchParams.set("max_results", String(Math.min(maxResults, 100)));
     timelineUrl.searchParams.set("tweet.fields", "created_at,public_metrics");
 
+    const timelineAuthHeader = makeReadAuthHeader("GET", timelineUrl.toString(), creds);
+    if (!timelineAuthHeader) return { error: "No auth configured" };
+
     const timelineResp = await ctx.http.fetch(timelineUrl.toString(), {
       method: "GET",
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: { Authorization: timelineAuthHeader },
     });
 
     if (!timelineResp.ok) {
@@ -191,13 +352,16 @@ async function getUserTimeline(
 }
 
 /**
- * Post a new tweet (requires user access token)
+ * Post a new tweet using OAuth 1.0a
  */
 async function postTweet(
   ctx: PluginContext,
   text: string,
   replyToId: string | null,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
+  accessTokenSecret: string,
 ): Promise<ToolResult> {
   if (!text || text.trim().length === 0) {
     return { error: "Tweet text cannot be empty" };
@@ -213,10 +377,20 @@ async function postTweet(
       body.reply = { in_reply_to_tweet_id: replyToId };
     }
 
-    const resp = await ctx.http.fetch("https://api.twitter.com/2/tweets", {
+    const url = "https://api.twitter.com/2/tweets";
+    const authHeader = buildOAuth1Header(
+      "POST",
+      url,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
+    );
+
+    const resp = await ctx.http.fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: authHeader,
         "Content-Type": "application/json",
       },
       body: JSON.stringify(body),
@@ -241,19 +415,31 @@ async function postTweet(
 }
 
 /**
- * Like a tweet (requires user access token)
+ * Like a tweet using OAuth 1.0a
  */
 async function likeTweet(
   ctx: PluginContext,
   tweetId: string,
   userId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
+  accessTokenSecret: string,
 ): Promise<ToolResult> {
   try {
-    const resp = await ctx.http.fetch(`https://api.twitter.com/2/users/${userId}/likes`, {
+    const url = `https://api.twitter.com/2/users/${userId}/likes`;
+    const authHeader = buildOAuth1Header(
+      "POST",
+      url,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
+    );
+    const resp = await ctx.http.fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: authHeader,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ tweet_id: tweetId }),
@@ -275,22 +461,31 @@ async function likeTweet(
 }
 
 /**
- * Unlike a tweet (requires user access token)
+ * Unlike a tweet using OAuth 1.0a
  */
 async function unlikeTweet(
   ctx: PluginContext,
   tweetId: string,
   userId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
+  accessTokenSecret: string,
 ): Promise<ToolResult> {
   try {
-    const resp = await ctx.http.fetch(
-      `https://api.twitter.com/2/users/${userId}/likes/${tweetId}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
+    const url = `https://api.twitter.com/2/users/${userId}/likes/${tweetId}`;
+    const authHeader = buildOAuth1Header(
+      "DELETE",
+      url,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
     );
+    const resp = await ctx.http.fetch(url, {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    });
 
     if (!resp.ok) {
       const error = await resp.text();
@@ -308,19 +503,31 @@ async function unlikeTweet(
 }
 
 /**
- * Retweet a tweet (requires user access token)
+ * Retweet a tweet using OAuth 1.0a
  */
 async function reTweet(
   ctx: PluginContext,
   tweetId: string,
   userId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
+  accessTokenSecret: string,
 ): Promise<ToolResult> {
   try {
-    const resp = await ctx.http.fetch(`https://api.twitter.com/2/users/${userId}/retweets`, {
+    const url = `https://api.twitter.com/2/users/${userId}/retweets`;
+    const authHeader = buildOAuth1Header(
+      "POST",
+      url,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
+    );
+    const resp = await ctx.http.fetch(url, {
       method: "POST",
       headers: {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: authHeader,
         "Content-Type": "application/json",
       },
       body: JSON.stringify({ tweet_id: tweetId }),
@@ -342,22 +549,31 @@ async function reTweet(
 }
 
 /**
- * Unretweet a tweet (requires user access token)
+ * Unretweet a tweet using OAuth 1.0a
  */
 async function unReTweet(
   ctx: PluginContext,
   tweetId: string,
   userId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
+  accessTokenSecret: string,
 ): Promise<ToolResult> {
   try {
-    const resp = await ctx.http.fetch(
-      `https://api.twitter.com/2/users/${userId}/retweets/${tweetId}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
+    const url = `https://api.twitter.com/2/users/${userId}/retweets/${tweetId}`;
+    const authHeader = buildOAuth1Header(
+      "DELETE",
+      url,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
     );
+    const resp = await ctx.http.fetch(url, {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    });
 
     if (!resp.ok) {
       const error = await resp.text();
@@ -375,23 +591,36 @@ async function unReTweet(
 }
 
 /**
- * Follow a user (requires user access token)
+ * Follow a user using OAuth 1.0a
  */
 async function followUser(
   ctx: PluginContext,
   targetUsername: string,
   userId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
-  bearerToken: string,
+  accessTokenSecret: string,
+  bearerToken: string | null,
 ): Promise<ToolResult> {
   try {
-    // Get target user ID
+    // Lookup target user ID (read — use bearer token if available)
     const userUrl = new URL(
       `https://api.twitter.com/2/users/by/username/${encodeURIComponent(targetUsername)}`,
     );
+    const readAuth = bearerToken
+      ? `Bearer ${bearerToken}`
+      : buildOAuth1Header(
+          "GET",
+          userUrl.toString(),
+          consumerKey,
+          consumerSecret,
+          accessToken,
+          accessTokenSecret,
+        );
     const userResp = await ctx.http.fetch(userUrl.toString(), {
       method: "GET",
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: { Authorization: readAuth },
     });
 
     if (!userResp.ok) {
@@ -405,18 +634,23 @@ async function followUser(
       return { error: `Could not resolve user ${targetUsername}` };
     }
 
-    // Follow the user
-    const followResp = await ctx.http.fetch(
-      `https://api.twitter.com/2/users/${userId}/following`,
-      {
-        method: "POST",
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "Content-Type": "application/json",
-        },
-        body: JSON.stringify({ target_user_id: targetUserId }),
-      },
+    const followUrl = `https://api.twitter.com/2/users/${userId}/following`;
+    const authHeader = buildOAuth1Header(
+      "POST",
+      followUrl,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
     );
+    const followResp = await ctx.http.fetch(followUrl, {
+      method: "POST",
+      headers: {
+        Authorization: authHeader,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ target_user_id: targetUserId }),
+    });
 
     if (!followResp.ok) {
       const error = await followResp.text();
@@ -434,23 +668,35 @@ async function followUser(
 }
 
 /**
- * Unfollow a user (requires user access token)
+ * Unfollow a user using OAuth 1.0a
  */
 async function unfollowUser(
   ctx: PluginContext,
   targetUsername: string,
   userId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
-  bearerToken: string,
+  accessTokenSecret: string,
+  bearerToken: string | null,
 ): Promise<ToolResult> {
   try {
-    // Get target user ID
     const userUrl = new URL(
       `https://api.twitter.com/2/users/by/username/${encodeURIComponent(targetUsername)}`,
     );
+    const readAuth = bearerToken
+      ? `Bearer ${bearerToken}`
+      : buildOAuth1Header(
+          "GET",
+          userUrl.toString(),
+          consumerKey,
+          consumerSecret,
+          accessToken,
+          accessTokenSecret,
+        );
     const userResp = await ctx.http.fetch(userUrl.toString(), {
       method: "GET",
-      headers: { Authorization: `Bearer ${bearerToken}` },
+      headers: { Authorization: readAuth },
     });
 
     if (!userResp.ok) {
@@ -464,14 +710,19 @@ async function unfollowUser(
       return { error: `Could not resolve user ${targetUsername}` };
     }
 
-    // Unfollow the user
-    const unfollowResp = await ctx.http.fetch(
-      `https://api.twitter.com/2/users/${userId}/following/${targetUserId}`,
-      {
-        method: "DELETE",
-        headers: { Authorization: `Bearer ${accessToken}` },
-      },
+    const unfollowUrl = `https://api.twitter.com/2/users/${userId}/following/${targetUserId}`;
+    const authHeader = buildOAuth1Header(
+      "DELETE",
+      unfollowUrl,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
     );
+    const unfollowResp = await ctx.http.fetch(unfollowUrl, {
+      method: "DELETE",
+      headers: { Authorization: authHeader },
+    });
 
     if (!unfollowResp.ok) {
       const error = await unfollowResp.text();
@@ -491,17 +742,29 @@ async function unfollowUser(
 }
 
 /**
- * Delete a tweet (requires user access token)
+ * Delete a tweet using OAuth 1.0a
  */
 async function deleteTweet(
   ctx: PluginContext,
   tweetId: string,
+  consumerKey: string,
+  consumerSecret: string,
   accessToken: string,
+  accessTokenSecret: string,
 ): Promise<ToolResult> {
   try {
-    const resp = await ctx.http.fetch(`https://api.twitter.com/2/tweets/${tweetId}`, {
+    const url = `https://api.twitter.com/2/tweets/${tweetId}`;
+    const authHeader = buildOAuth1Header(
+      "DELETE",
+      url,
+      consumerKey,
+      consumerSecret,
+      accessToken,
+      accessTokenSecret,
+    );
+    const resp = await ctx.http.fetch(url, {
       method: "DELETE",
-      headers: { Authorization: `Bearer ${accessToken}` },
+      headers: { Authorization: authHeader },
     });
 
     if (!resp.ok) {
@@ -523,14 +786,47 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
   // Secrets are resolved lazily inside each handler so the plugin
   // can install and start without requiring secrets to be pre-configured.
 
-  async function getBearerToken(): Promise<string | null> {
-    const config = await getConfig(ctx);
-    return await ctx.secrets.resolve(config.bearerTokenRef).catch(() => null);
+  /**
+   * Resolve a secret: try the secrets store first (ref is a named secret key).
+   * If that fails AND the ref looks like an actual credential value (long string
+   * with non-word chars, or URL-encoded), use it directly. Short alphanumeric
+   * names (like "x_bearer_token") are treated as secret references only.
+   */
+  async function resolveSecret(ref: string | undefined): Promise<string | null> {
+    if (!ref) return null;
+    try {
+      const val = await ctx.secrets.resolve(ref);
+      if (val) return val;
+    } catch (_) { /* fall through */ }
+    // If the ref itself looks like a credential value (contains special chars
+    // common in tokens: -, +, /, =, %, uppercase hex), use it as the value.
+    if (ref.length > 20 || /[+/=%\-]/.test(ref)) {
+      // URL-decode in case the user pasted a URL-encoded token
+      try { return decodeURIComponent(ref); } catch (_) { return ref; }
+    }
+    return null;
   }
 
-  async function getAccessToken(): Promise<string | null> {
+  async function getBearerToken(): Promise<string | null> {
     const config = await getConfig(ctx);
-    return await ctx.secrets.resolve(config.accessTokenRef).catch(() => null);
+    return await resolveSecret(config.bearerTokenRef);
+  }
+
+  async function getOAuth1Creds(): Promise<{ consumerKey: string | null; consumerSecret: string | null; accessToken: string | null; accessTokenSecret: string | null }> {
+    const config = await getConfig(ctx);
+    const [consumerKey, consumerSecret, accessToken, accessTokenSecret] = await Promise.all([
+      resolveSecret(config.consumerKeyRef),
+      resolveSecret(config.consumerSecretRef),
+      resolveSecret(config.accessTokenRef),
+      resolveSecret(config.accessTokenSecretRef),
+    ]);
+    return { consumerKey, consumerSecret, accessToken, accessTokenSecret };
+  }
+
+  async function getReadCreds(): Promise<XApiCreds> {
+    const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+    const bearerToken = await getBearerToken();
+    return { consumerKey, consumerSecret, accessToken, accessTokenSecret, bearerToken };
   }
 
   // x-search
@@ -549,14 +845,11 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const bearerToken = await getBearerToken();
-      if (!bearerToken) {
-        return { error: "Bearer token not configured (set x_bearer_token secret)" };
-      }
+      const creds = await getReadCreds();
       const p = params as Record<string, unknown>;
       const query = p.query as string;
       const maxResults = Math.max(1, Math.min(((p.maxResults as number) ?? 10), 100));
-      return await searchTweets(ctx, query, maxResults, bearerToken);
+      return await searchTweets(ctx, query, maxResults, creds);
     },
   );
 
@@ -575,12 +868,9 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const bearerToken = await getBearerToken();
-      if (!bearerToken) {
-        return { error: "Bearer token not configured (set x_bearer_token secret)" };
-      }
+      const creds = await getReadCreds();
       const p = params as Record<string, unknown>;
-      return await getUser(ctx, p.username as string, bearerToken);
+      return await getUser(ctx, p.username as string, creds);
     },
   );
 
@@ -600,14 +890,11 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const bearerToken = await getBearerToken();
-      if (!bearerToken) {
-        return { error: "Bearer token not configured (set x_bearer_token secret)" };
-      }
+      const creds = await getReadCreds();
       const p = params as Record<string, unknown>;
       const username = p.username as string;
       const maxResults = Math.max(1, Math.min(((p.maxResults as number) ?? 10), 100));
-      return await getUserTimeline(ctx, username, maxResults, bearerToken);
+      return await getUserTimeline(ctx, username, maxResults, creds);
     },
   );
 
@@ -616,7 +903,7 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-post-tweet",
     {
       displayName: "Post Tweet",
-      description: "Post a new tweet (requires authentication)",
+      description: "Post a new tweet using OAuth 1.0a (requires x_consumer_key, x_consumer_secret, x_access_token, x_access_token_secret)",
       parametersSchema: {
         type: "object",
         properties: {
@@ -627,14 +914,14 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        return { error: "Access token not configured (set x_access_token secret)" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not fully configured. Set secrets: x_consumer_key, x_consumer_secret, x_access_token, x_access_token_secret" };
       }
       const p = params as Record<string, unknown>;
       const text = p.text as string;
       const replyToId = (p.replyToId as string) ?? null;
-      return await postTweet(ctx, text, replyToId, accessToken);
+      return await postTweet(ctx, text, replyToId, consumerKey, consumerSecret, accessToken, accessTokenSecret);
     },
   );
 
@@ -643,22 +930,23 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-like",
     {
       displayName: "Like Tweet",
-      description: "Like a tweet (requires authentication)",
+      description: "Like a tweet using OAuth 1.0a (requires userId and OAuth 1.0a credentials)",
       parametersSchema: {
         type: "object",
         properties: {
           tweetId: { type: "string" },
+          userId: { type: "string", description: "Your X user ID (numeric)" },
         },
-        required: ["tweetId"],
+        required: ["tweetId", "userId"],
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        return { error: "Access token not configured (set x_access_token secret)" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
       const p = params as Record<string, unknown>;
-      return { error: "User ID resolution needed (implement via token introspection)" };
+      return await likeTweet(ctx, p.tweetId as string, p.userId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret);
     },
   );
 
@@ -667,21 +955,23 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-unlike",
     {
       displayName: "Unlike Tweet",
-      description: "Unlike a tweet (requires authentication)",
+      description: "Unlike a tweet using OAuth 1.0a",
       parametersSchema: {
         type: "object",
         properties: {
           tweetId: { type: "string" },
+          userId: { type: "string", description: "Your X user ID (numeric)" },
         },
-        required: ["tweetId"],
+        required: ["tweetId", "userId"],
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        return { error: "Access token not configured (set x_access_token secret)" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
-      return { error: "User ID resolution needed (implement via token introspection)" };
+      const p = params as Record<string, unknown>;
+      return await unlikeTweet(ctx, p.tweetId as string, p.userId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret);
     },
   );
 
@@ -690,21 +980,23 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-retweet",
     {
       displayName: "Retweet",
-      description: "Retweet a tweet (requires authentication)",
+      description: "Retweet a tweet using OAuth 1.0a",
       parametersSchema: {
         type: "object",
         properties: {
           tweetId: { type: "string" },
+          userId: { type: "string", description: "Your X user ID (numeric)" },
         },
-        required: ["tweetId"],
+        required: ["tweetId", "userId"],
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        return { error: "Access token not configured (set x_access_token secret)" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
-      return { error: "User ID resolution needed (implement via token introspection)" };
+      const p = params as Record<string, unknown>;
+      return await reTweet(ctx, p.tweetId as string, p.userId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret);
     },
   );
 
@@ -713,21 +1005,23 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-unretweet",
     {
       displayName: "Unretweet",
-      description: "Remove a retweet (requires authentication)",
+      description: "Remove a retweet using OAuth 1.0a",
       parametersSchema: {
         type: "object",
         properties: {
           tweetId: { type: "string" },
+          userId: { type: "string", description: "Your X user ID (numeric)" },
         },
-        required: ["tweetId"],
+        required: ["tweetId", "userId"],
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        return { error: "Access token not configured (set x_access_token secret)" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
-      return { error: "User ID resolution needed (implement via token introspection)" };
+      const p = params as Record<string, unknown>;
+      return await unReTweet(ctx, p.tweetId as string, p.userId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret);
     },
   );
 
@@ -736,22 +1030,24 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-follow",
     {
       displayName: "Follow User",
-      description: "Follow a user (requires authentication)",
+      description: "Follow a user using OAuth 1.0a",
       parametersSchema: {
         type: "object",
         properties: {
           username: { type: "string" },
+          userId: { type: "string", description: "Your X user ID (numeric)" },
         },
-        required: ["username"],
+        required: ["username", "userId"],
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      const bearerToken = await getBearerToken();
-      if (!accessToken || !bearerToken) {
-        return { error: "Tokens not configured for write operations" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
-      return { error: "User ID resolution needed (implement via token introspection)" };
+      const bearerToken = await getBearerToken();
+      const p = params as Record<string, unknown>;
+      return await followUser(ctx, p.username as string, p.userId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret, bearerToken);
     },
   );
 
@@ -760,22 +1056,24 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-unfollow",
     {
       displayName: "Unfollow User",
-      description: "Unfollow a user (requires authentication)",
+      description: "Unfollow a user using OAuth 1.0a",
       parametersSchema: {
         type: "object",
         properties: {
           username: { type: "string" },
+          userId: { type: "string", description: "Your X user ID (numeric)" },
         },
-        required: ["username"],
+        required: ["username", "userId"],
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      const bearerToken = await getBearerToken();
-      if (!accessToken || !bearerToken) {
-        return { error: "Tokens not configured for write operations" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
-      return { error: "User ID resolution needed (implement via token introspection)" };
+      const bearerToken = await getBearerToken();
+      const p = params as Record<string, unknown>;
+      return await unfollowUser(ctx, p.username as string, p.userId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret, bearerToken);
     },
   );
 
@@ -784,7 +1082,7 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
     "x-delete-tweet",
     {
       displayName: "Delete Tweet",
-      description: "Delete a tweet you posted (requires authentication)",
+      description: "Delete a tweet you posted using OAuth 1.0a",
       parametersSchema: {
         type: "object",
         properties: {
@@ -794,12 +1092,12 @@ async function registerToolHandlers(ctx: PluginContext): Promise<void> {
       },
     },
     async (params: unknown): Promise<ToolResult> => {
-      const accessToken = await getAccessToken();
-      if (!accessToken) {
-        return { error: "Access token not configured (set x_access_token secret)" };
+      const { consumerKey, consumerSecret, accessToken, accessTokenSecret } = await getOAuth1Creds();
+      if (!consumerKey || !consumerSecret || !accessToken || !accessTokenSecret) {
+        return { error: "OAuth 1.0a credentials not configured" };
       }
       const p = params as Record<string, unknown>;
-      return await deleteTweet(ctx, p.tweetId as string, accessToken);
+      return await deleteTweet(ctx, p.tweetId as string, consumerKey, consumerSecret, accessToken, accessTokenSecret);
     },
   );
 }
