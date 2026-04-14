@@ -483,7 +483,10 @@ export function pluginRoutes(
    * Errors: 501 if tool dispatcher is not configured
    */
   router.get("/plugins/tools", async (req, res) => {
-    assertBoard(req);
+    if (req.actor.type === "none") {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
 
     if (!toolDeps) {
       res.status(501).json({ error: "Plugin tool dispatch is not enabled" });
@@ -517,7 +520,10 @@ export function pluginRoutes(
    * - 502 if the plugin worker is unavailable or the RPC call fails
    */
   router.post("/plugins/tools/execute", async (req, res) => {
-    assertBoard(req);
+    if (req.actor.type === "none") {
+      res.status(401).json({ error: "Authentication required" });
+      return;
+    }
 
     if (!toolDeps) {
       res.status(501).json({ error: "Plugin tool dispatch is not enabled" });
