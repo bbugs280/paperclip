@@ -21,6 +21,7 @@ import {
   stringifyPaperclipWakePayload,
   runChildProcess,
   readPaperclipRuntimeSkillEntries,
+  readPaperclipSharedInstructions,
   resolvePaperclipDesiredSkillNames,
 } from "@paperclipai/adapter-utils/server-utils";
 import { isOpenCodeUnknownSessionError, parseOpenCodeJsonl } from "./parse.js";
@@ -246,6 +247,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
           `[paperclip] Warning: could not read agent instructions file "${resolvedInstructionsFilePath}": ${reason}\n`,
         );
       }
+    }
+
+    const sharedInstructions = readPaperclipSharedInstructions(config);
+    if (sharedInstructions) {
+      instructionsPrefix += sharedInstructions + "\n\n";
     }
 
     const commandNotes = (() => {

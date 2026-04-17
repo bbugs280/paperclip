@@ -8,6 +8,7 @@ import {
   type AgentPermissionUpdate,
 } from "../api/agents";
 import { companySkillsApi } from "../api/companySkills";
+import { companiesApi } from "../api/companies";
 import { budgetsApi } from "../api/budgets";
 import { heartbeatsApi } from "../api/heartbeats";
 import { instanceSettingsApi } from "../api/instanceSettings";
@@ -1998,6 +1999,8 @@ function PromptsTab({
         </div>
       )}
 
+      {companyId && <SharedInstructionsPanel companyId={companyId} />}
+
       <Collapsible defaultOpen={currentMode === "external"}>
         <CollapsibleTrigger className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors group">
           <ChevronRight className="h-3 w-3 transition-transform group-data-[state=open]:rotate-90" />
@@ -2359,6 +2362,212 @@ function PromptsTab({
       </div>
 
     </div>
+  );
+}
+
+/* ---- Shared Instructions Panel ---- */
+
+function SharedInstructionsPanel({ companyId }: { companyId: string }) {
+  const queryClient = useQueryClient();
+  const [selectedFile, setSelectedFile] = useState<string | null>(null);
+  const [draft, setDraft] = useState<string | null>(null);
+  const [newFileName, setNewFileName] = useState("");
+  const [showNewFile, setShowNewFile] = useState(false);
+
+  const { data: bundle } = useQuery({
+    queryKey: queryKeys.companies.sharedInstructions(companyId),
+    queryFn: () => companiesApi.sharedInstructions(companyId),
+  });
+
+  const fileToLoad = selectedFile ?? bundle?.files?.[0]?.path ?? null;
+
+  const { data: fileDetail } = useQuery({
+    queryKey: queryKeys.companies.sharedInstructionsFile(companyId, fileToLoad ?? ""),
+    queryFn: () => companiesApi.sharedInstructionsFile(companyId, fileToLoad!),
+    enabled: Boolean(fileToLoad && bundle?.files?.some((f) => f.path === fileToLoad)),
+  });
+
+  const saveFile = useMutation({
+    mutationFn: (data: { path: string; content: string }) =>
+      companiesApi.saveSharedInstructionsFile(companyId, data),
+    onSuccess: (_, variables) => {
+      setDraft(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.sharedInstructions(companyId) });
+      queryClient.invalidateQueries({
+        queryKey: queryKeys.companies.sharedInstructionsFile(companyId, variables.path),
+      });
+    },
+  });
+
+  const deleteFile = useMutation({
+    mutationFn: (relativePath: string) =>
+      companiesApi.deleteSharedInstructionsFile(companyId, relativePath),
+    onSuccess: () => {
+      setSelectedFile(null);
+      setDraft(null);
+      queryClient.invalidateQueries({ queryKey: queryKeys.companies.sharedInstructions(companyId) });
+    },
+  });
+
+  const fileCount = bundle?.files?.length ?? 0;
+  const currentContent = fileDetail?.content ?? "";
+  const displayValue = draft ?? currentContent;
+  const isDirty = draft !== null && draft !== currentContent;
+
+  useEffect(() => {
+    setDraft(null);
+  }, [fileToLoad]);
+
+  return (
+    <Collapsible defaultOpen={fileCount > 0}>
+      <CollapsibleTrigger className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors group">
+        <ChevronRight className="h-3 w-3 transition-transform group-data-[state=open]:rotate-90" />
+        <span className="font-medium">Shared Instructions</span>
+        {fileCount > 0 && (
+          <span className="rounded-full bg-muted px-1.5 py-0.5 text-[10px] tabular-nums">{fileCount}</span>
+        )}
+      </CollapsibleTrigger>
+      <CollapsibleContent className="pt-3 pb-1">
+        <p className="text-xs text-muted-foreground mb-3">
+          Files shared across all agents in this company. Agents reference these at runtime via the shared directory.
+        </p>
+        <div className="space-y-3">
+          <div className="flex items-center gap-2 flex-wrap">
+            {bundle?.files?.map((f) => (
+              <Button
+                key={f.path}
+                type="button"
+                size="sm"
+                variant={fileToLoad === f.path ? "default" : "outline"}
+                className="font-mono text-xs"
+                onClick={() => { setSelectedFile(f.path); setDraft(null); }}
+              >
+                {f.path}
+              </Button>
+            ))}
+            {!showNewFile && (
+              <Button
+                type="button"
+                size="sm"
+                variant="ghost"
+                className="text-xs"
+                onClick={() => setShowNewFile(true)}
+              >
+                + New
+              </Button>
+            )}
+          </div>
+          {showNewFile && (
+            <div className="flex items-center gap-2">
+              <Input
+                value={newFileName}
+                onChange={(e) => setNewFileName(e.target.value)}
+                placeholder="FILENAME.md"
+                className="font-mono text-xs max-w-[200px]"
+                autoFocus
+                onKeyDown={(e) => {
+                  if (e.key === "Escape") { setShowNewFile(false); setNewFileName(""); }
+                  if (e.key === "Enter" && newFileName.trim()) {
+                    saveFile.mutate({ path: newFileName.trim(), content: "" }, {
+                      onSuccess: () => {
+                        setSelectedFile(newFileName.trim());
+                        setNewFileName("");
+                        setShowNewFile(false);
+                        setDraft("");
+                      },
+                    });
+                  }
+                }}
+              />
+              <Button size="sm" variant="default" disabled={!newFileName.trim()}
+                onClick={() => {
+                  saveFile.mutate({ path: newFileName.trim(), content: "" }, {
+                    onSuccess: () => {
+                      setSelectedFile(newFileName.trim());
+                      setNewFileName("");
+                      setShowNewFile(false);
+                      setDraft("");
+                    },
+                  });
+                }}
+              >
+                Create
+              </Button>
+              <Button size="sm" variant="ghost" onClick={() => { setShowNewFile(false); setNewFileName(""); }}>
+                Cancel
+              </Button>
+            </div>
+          )}
+          {fileToLoad && (
+            <div className="border border-border rounded-lg p-3 space-y-2">
+              <div className="flex items-center justify-between">
+                <h5 className="text-xs font-medium font-mono">{fileToLoad}</h5>
+                <div className="flex items-center gap-2">
+                  {isDirty && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="default"
+                      className="text-xs"
+                      disabled={saveFile.isPending}
+                      onClick={() => saveFile.mutate({ path: fileToLoad, content: displayValue })}
+                    >
+                      {saveFile.isPending ? "Saving…" : "Save"}
+                    </Button>
+                  )}
+                  {isDirty && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs"
+                      onClick={() => setDraft(null)}
+                    >
+                      Discard
+                    </Button>
+                  )}
+                  {!isDirty && bundle && bundle.files.length > 0 && (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-xs text-destructive"
+                      disabled={deleteFile.isPending}
+                      onClick={() => {
+                        if (confirm(`Delete shared file "${fileToLoad}"?`)) {
+                          deleteFile.mutate(fileToLoad);
+                        }
+                      }}
+                    >
+                      Delete
+                    </Button>
+                  )}
+                </div>
+              </div>
+              {isMarkdown(fileToLoad) ? (
+                <MarkdownEditor
+                  key={fileToLoad}
+                  value={displayValue}
+                  onChange={(value) => setDraft(value ?? "")}
+                  placeholder="# Shared instructions"
+                  contentClassName="min-h-[200px] text-sm font-mono"
+                />
+              ) : (
+                <textarea
+                  value={displayValue}
+                  onChange={(e) => setDraft(e.target.value)}
+                  className="min-h-[200px] w-full rounded-md border border-border bg-transparent px-3 py-2 font-mono text-sm outline-none"
+                  placeholder="File contents"
+                />
+              )}
+            </div>
+          )}
+          {fileCount === 0 && !showNewFile && (
+            <p className="text-xs text-muted-foreground italic">No shared instruction files yet.</p>
+          )}
+        </div>
+      </CollapsibleContent>
+    </Collapsible>
   );
 }
 

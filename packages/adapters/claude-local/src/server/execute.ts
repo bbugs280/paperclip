@@ -12,6 +12,7 @@ import {
   parseJson,
   buildPaperclipEnv,
   readPaperclipRuntimeSkillEntries,
+  readPaperclipSharedInstructions,
   joinPromptSections,
   buildInvocationEnvForLogs,
   ensureAbsoluteDirectory,
@@ -357,6 +358,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         `[paperclip] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
       );
     }
+  }
+  const sharedInstructions = readPaperclipSharedInstructions(config);
+  if (sharedInstructions) {
+    combinedInstructionsContents = (combinedInstructionsContents ?? "") + sharedInstructions;
   }
   const promptBundle = await prepareClaudePromptBundle({
     companyId: agent.companyId,

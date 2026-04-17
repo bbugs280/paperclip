@@ -863,6 +863,15 @@ export async function readPaperclipRuntimeSkillEntries(
   return listPaperclipSkillEntries(moduleDir, additionalCandidates);
 }
 
+/**
+ * Read the pre-assembled shared instructions content injected by the server
+ * into the adapter runtime config. Returns empty string if none present.
+ */
+export function readPaperclipSharedInstructions(config: Record<string, unknown>): string {
+  const value = config.paperclipSharedInstructions;
+  return typeof value === "string" ? value : "";
+}
+
 export async function readPaperclipSkillMarkdown(
   moduleDir: string,
   skillKey: string,

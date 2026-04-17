@@ -61,6 +61,16 @@ export function errorHandler(
     return;
   }
 
+  // Express body-parser throws SyntaxError with status 400 for malformed JSON
+  if (
+    err instanceof SyntaxError &&
+    "status" in err &&
+    (err as any).status === 400
+  ) {
+    res.status(400).json({ error: "Malformed JSON in request body" });
+    return;
+  }
+
   const rootError = err instanceof Error ? err : new Error(String(err));
   attachErrorContext(
     req,

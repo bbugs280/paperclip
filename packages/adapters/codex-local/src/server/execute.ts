@@ -13,6 +13,7 @@ import {
   ensurePaperclipSkillSymlink,
   ensurePathInEnv,
   readPaperclipRuntimeSkillEntries,
+  readPaperclipSharedInstructions,
   resolveCommandForLogs,
   resolvePaperclipDesiredSkillNames,
   renderTemplate,
@@ -422,6 +423,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         `[paperclip] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
       );
     }
+  }
+  const sharedInstructions = readPaperclipSharedInstructions(config);
+  if (sharedInstructions) {
+    instructionsPrefix += sharedInstructions + "\n\n";
+    instructionsChars = instructionsPrefix.length;
   }
   const repoAgentsNote =
     "Codex exec automatically applies repo-scoped AGENTS.md instructions from the current workspace; Paperclip does not currently suppress that discovery.";

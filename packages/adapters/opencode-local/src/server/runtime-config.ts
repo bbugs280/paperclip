@@ -76,6 +76,29 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   };
   await fs.writeFile(runtimeConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");
 
+  // Inject a global AGENTS.md with critical bash tool requirements.
+  // This is loaded by opencode as the global ~/.config/opencode/AGENTS.md,
+  // providing a system-level reminder that all agents must see.
+  const globalAgentsMdPath = path.join(runtimeConfigDir, "AGENTS.md");
+  const existingAgentsMd = await fs.readFile(globalAgentsMdPath, "utf8").catch(() => "");
+  const bashRuleBlock = `
+## Critical: Bash Tool Requirements
+
+CRITICAL: Every single bash tool call MUST include a \`description\` field containing a short
+string that summarises what the command does. The description field is REQUIRED — omitting it
+causes an immediate validation error with exit code 1 and terminates the run.
+
+Correct bash call example:
+  description: "List files in current directory"
+  command: "ls -la"
+
+If you have already seen a bash validation error about a missing description, STOP and retry
+that call with description included.
+`;
+  if (!existingAgentsMd.includes("Critical: Bash Tool Requirements")) {
+    await fs.writeFile(globalAgentsMdPath, existingAgentsMd + bashRuleBlock, "utf8");
+  }
+
   return {
     env: {
       ...input.env,
@@ -83,6 +106,7 @@ export async function prepareOpenCodeRuntimeConfig(input: {
     },
     notes: [
       "Injected runtime OpenCode config with permission.external_directory=allow to avoid headless approval prompts.",
+      "Injected global AGENTS.md with bash tool description requirement.",
     ],
     cleanup: async () => {
       await fs.rm(runtimeConfigHome, { recursive: true, force: true });

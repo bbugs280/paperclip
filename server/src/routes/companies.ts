@@ -20,6 +20,7 @@ import {
   budgetService,
   companyPortabilityService,
   companyService,
+  companySharedInstructionsService,
   feedbackService,
   logActivity,
 } from "../services/index.js";
@@ -395,6 +396,83 @@ export function companyRoutes(db: Db, storage?: StorageService) {
       entityId: companyId,
     });
     res.json(company);
+  });
+
+  /* ---- Shared instructions files ---- */
+
+  const sharedInstructions = companySharedInstructionsService();
+
+  router.get("/:companyId/shared-instructions", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    res.json(await sharedInstructions.getBundle(companyId));
+  });
+
+  router.get("/:companyId/shared-instructions/file", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const relativePath = typeof req.query.path === "string" ? req.query.path : "";
+    if (!relativePath.trim()) {
+      res.status(422).json({ error: "Query parameter 'path' is required" });
+      return;
+    }
+    res.json(await sharedInstructions.readFile(companyId, relativePath));
+  });
+
+  router.put("/:companyId/shared-instructions/file", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const { path: filePath, content } = req.body as { path?: string; content?: string };
+    if (!filePath || typeof filePath !== "string" || !filePath.trim()) {
+      res.status(422).json({ error: "Body field 'path' is required" });
+      return;
+    }
+    if (typeof content !== "string") {
+      res.status(422).json({ error: "Body field 'content' is required" });
+      return;
+    }
+    const actor = getActorInfo(req);
+    const file = await sharedInstructions.writeFile(companyId, filePath, content);
+    await logActivity(db, {
+      companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "company.shared_instructions_updated",
+      entityType: "company",
+      entityId: companyId,
+      details: { path: file.path },
+    });
+    res.json(file);
+  });
+
+  router.delete("/:companyId/shared-instructions/file", async (req, res) => {
+    assertBoard(req);
+    const companyId = req.params.companyId as string;
+    assertCompanyAccess(req, companyId);
+    const relativePath = typeof req.query.path === "string" ? req.query.path : "";
+    if (!relativePath.trim()) {
+      res.status(422).json({ error: "Query parameter 'path' is required" });
+      return;
+    }
+    const actor = getActorInfo(req);
+    await sharedInstructions.deleteFile(companyId, relativePath);
+    await logActivity(db, {
+      companyId,
+      actorType: actor.actorType,
+      actorId: actor.actorId,
+      agentId: actor.agentId,
+      runId: actor.runId,
+      action: "company.shared_instructions_deleted",
+      entityType: "company",
+      entityId: companyId,
+      details: { path: relativePath },
+    });
+    res.json({ ok: true });
   });
 
   router.delete("/:companyId", async (req, res) => {

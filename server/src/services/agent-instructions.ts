@@ -733,3 +733,121 @@ export function agentInstructionsService() {
     materializeManagedBundle,
   };
 }
+
+/* ---- Company-wide shared instructions ---- */
+
+function resolveCompanySharedRoot(companyId: string): string {
+  return path.resolve(resolvePaperclipInstanceRoot(), "companies", companyId, "shared");
+}
+
+export type SharedInstructionsFileSummary = {
+  path: string;
+  size: number;
+  language: string;
+  markdown: boolean;
+  editable: boolean;
+};
+
+export type SharedInstructionsFileDetail = SharedInstructionsFileSummary & {
+  content: string;
+};
+
+export type SharedInstructionsBundle = {
+  companyId: string;
+  rootPath: string;
+  files: SharedInstructionsFileSummary[];
+};
+
+export function companySharedInstructionsService() {
+  async function getBundle(companyId: string): Promise<SharedInstructionsBundle> {
+    const rootPath = resolveCompanySharedRoot(companyId);
+    const stat = await statIfExists(rootPath);
+    if (!stat?.isDirectory()) {
+      return { companyId, rootPath, files: [] };
+    }
+    const filePaths = await listFilesRecursive(rootPath);
+    const files: SharedInstructionsFileSummary[] = await Promise.all(
+      filePaths.map(async (relativePath) => {
+        const absolutePath = resolvePathWithinRoot(rootPath, relativePath);
+        const fileStat = await fs.stat(absolutePath);
+        return {
+          path: relativePath,
+          size: fileStat.size,
+          language: inferLanguage(relativePath),
+          markdown: isMarkdown(relativePath),
+          editable: true,
+        };
+      }),
+    );
+    return { companyId, rootPath, files };
+  }
+
+  async function readFile(companyId: string, relativePath: string): Promise<SharedInstructionsFileDetail> {
+    const rootPath = resolveCompanySharedRoot(companyId);
+    const absolutePath = resolvePathWithinRoot(rootPath, relativePath);
+    const [content, fileStat] = await Promise.all([
+      fs.readFile(absolutePath, "utf8").catch(() => null),
+      fs.stat(absolutePath).catch(() => null),
+    ]);
+    if (content === null || !fileStat?.isFile()) throw notFound("Shared instructions file not found");
+    const normalizedPath = normalizeRelativeFilePath(relativePath);
+    return {
+      path: normalizedPath,
+      size: fileStat.size,
+      language: inferLanguage(normalizedPath),
+      markdown: isMarkdown(normalizedPath),
+      editable: true,
+      content,
+    };
+  }
+
+  async function writeFile(
+    companyId: string,
+    relativePath: string,
+    content: string,
+  ): Promise<SharedInstructionsFileDetail> {
+    const rootPath = resolveCompanySharedRoot(companyId);
+    const normalizedPath = normalizeRelativeFilePath(relativePath);
+    const absolutePath = resolvePathWithinRoot(rootPath, normalizedPath);
+    await fs.mkdir(path.dirname(absolutePath), { recursive: true });
+    await fs.writeFile(absolutePath, content, "utf8");
+    return readFile(companyId, normalizedPath);
+  }
+
+  async function deleteFile(companyId: string, relativePath: string): Promise<void> {
+    const rootPath = resolveCompanySharedRoot(companyId);
+    const normalizedPath = normalizeRelativeFilePath(relativePath);
+    const absolutePath = resolvePathWithinRoot(rootPath, normalizedPath);
+    await fs.rm(absolutePath, { force: true });
+  }
+
+  return { getBundle, readFile, writeFile, deleteFile };
+}
+
+/**
+ * Read all company shared instruction files and return their combined content
+ * as a single string suitable for injection into agent prompts.
+ * Returns empty string if no shared instructions exist.
+ */
+export async function readSharedInstructionsContent(companyId: string): Promise<string> {
+  const rootPath = resolveCompanySharedRoot(companyId);
+  const stat = await statIfExists(rootPath);
+  if (!stat?.isDirectory()) return "";
+
+  const filePaths = await listFilesRecursive(rootPath);
+  if (filePaths.length === 0) return "";
+
+  const sections: string[] = [];
+  for (const relativePath of filePaths.sort()) {
+    const absolutePath = resolvePathWithinRoot(rootPath, relativePath);
+    try {
+      const content = await fs.readFile(absolutePath, "utf8");
+      if (content.trim().length === 0) continue;
+      sections.push(`<!-- shared/${relativePath} -->\n${content}`);
+    } catch {
+      // skip unreadable files
+    }
+  }
+  if (sections.length === 0) return "";
+  return `\n\n# Company Shared Instructions\n\n${sections.join("\n\n")}`;
+}

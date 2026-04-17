@@ -8,6 +8,8 @@ import type {
   CompanyPortabilityPreviewRequest,
   CompanyPortabilityPreviewResult,
   UpdateCompanyBranding,
+  SharedInstructionsBundle,
+  SharedInstructionsFileDetail,
 } from "@paperclipai/shared";
 import { api } from "./client";
 
@@ -62,4 +64,18 @@ export const companiesApi = {
     api.post<CompanyPortabilityPreviewResult>("/companies/import/preview", data),
   importBundle: (data: CompanyPortabilityImportRequest) =>
     api.post<CompanyPortabilityImportResult>("/companies/import", data),
+  sharedInstructions: (companyId: string) =>
+    api.get<SharedInstructionsBundle>(`/companies/${companyId}/shared-instructions`),
+  sharedInstructionsFile: (companyId: string, relativePath: string) =>
+    api.get<SharedInstructionsFileDetail>(
+      `/companies/${companyId}/shared-instructions/file?path=${encodeURIComponent(relativePath)}`,
+    ),
+  saveSharedInstructionsFile: (
+    companyId: string,
+    data: { path: string; content: string },
+  ) => api.put<SharedInstructionsFileDetail>(`/companies/${companyId}/shared-instructions/file`, data),
+  deleteSharedInstructionsFile: (companyId: string, relativePath: string) =>
+    api.delete<{ ok: true }>(
+      `/companies/${companyId}/shared-instructions/file?path=${encodeURIComponent(relativePath)}`,
+    ),
 };

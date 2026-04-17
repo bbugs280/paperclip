@@ -69,6 +69,7 @@ import {
   loadDefaultAgentInstructionsBundle,
   resolveDefaultAgentInstructionsBundleRole,
 } from "../services/default-agent-instructions.js";
+import { readSharedInstructionsContent } from "../services/agent-instructions.js";
 import { getTelemetryClient } from "../telemetry.js";
 
 export function agentRoutes(db: Db) {
@@ -657,9 +658,11 @@ export function agentRoutes(db: Db) {
     const runtimeSkillEntries = await companySkills.listRuntimeSkillEntries(companyId, {
       materializeMissing: shouldMaterializeRuntimeSkillsForAdapter(adapterType),
     });
+    const sharedInstructionsContent = await readSharedInstructionsContent(companyId);
     return {
       ...config,
       paperclipRuntimeSkills: runtimeSkillEntries,
+      ...(sharedInstructionsContent ? { paperclipSharedInstructions: sharedInstructionsContent } : {}),
     };
   }
 

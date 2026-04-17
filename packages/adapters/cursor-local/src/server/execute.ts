@@ -15,6 +15,7 @@ import {
   ensurePaperclipSkillSymlink,
   ensurePathInEnv,
   readPaperclipRuntimeSkillEntries,
+  readPaperclipSharedInstructions,
   resolveCommandForLogs,
   resolvePaperclipDesiredSkillNames,
   removeMaintainerOnlySkillSymlinks,
@@ -327,6 +328,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         `[paperclip] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
       );
     }
+  }
+  const sharedInstructions = readPaperclipSharedInstructions(config);
+  if (sharedInstructions) {
+    instructionsPrefix += sharedInstructions + "\n\n";
+    instructionsChars = instructionsPrefix.length;
   }
   const commandNotes = (() => {
     const notes: string[] = [];

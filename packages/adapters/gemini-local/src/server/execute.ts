@@ -17,6 +17,7 @@ import {
   joinPromptSections,
   ensurePathInEnv,
   readPaperclipRuntimeSkillEntries,
+  readPaperclipSharedInstructions,
   resolveCommandForLogs,
   resolvePaperclipDesiredSkillNames,
   removeMaintainerOnlySkillSymlinks,
@@ -271,6 +272,10 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
         `[paperclip] Warning: could not read agent instructions file "${instructionsFilePath}": ${reason}\n`,
       );
     }
+  }
+  const sharedInstructions = readPaperclipSharedInstructions(config);
+  if (sharedInstructions) {
+    instructionsPrefix += sharedInstructions + "\n\n";
   }
   const commandNotes = (() => {
     const notes: string[] = ["Prompt is passed to Gemini via --prompt for non-interactive execution."];

@@ -15,6 +15,24 @@ export interface AgentPermissions {
 
 export type AgentInstructionsBundleMode = "managed" | "external";
 
+export interface SharedInstructionsFileSummary {
+  path: string;
+  size: number;
+  language: string;
+  markdown: boolean;
+  editable: boolean;
+}
+
+export interface SharedInstructionsFileDetail extends SharedInstructionsFileSummary {
+  content: string;
+}
+
+export interface SharedInstructionsBundle {
+  companyId: string;
+  rootPath: string;
+  files: SharedInstructionsFileSummary[];
+}
+
 export interface AgentInstructionsFileSummary {
   path: string;
   size: number;

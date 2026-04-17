@@ -16,6 +16,7 @@ import {
   ensurePaperclipSkillSymlink,
   ensurePathInEnv,
   readPaperclipRuntimeSkillEntries,
+  readPaperclipSharedInstructions,
   resolveCommandForLogs,
   resolvePaperclipDesiredSkillNames,
   removeMaintainerOnlySkillSymlinks,
@@ -289,6 +290,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     }
   } else {
     systemPromptExtension = promptTemplate;
+  }
+
+  const sharedInstructions = readPaperclipSharedInstructions(config);
+  if (sharedInstructions) {
+    systemPromptExtension += sharedInstructions + "\n\n";
   }
 
   const bootstrapPromptTemplate = asString(config.bootstrapPromptTemplate, "");

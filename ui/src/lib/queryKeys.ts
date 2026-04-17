@@ -3,6 +3,9 @@ export const queryKeys = {
     all: ["companies"] as const,
     detail: (id: string) => ["companies", id] as const,
     stats: ["companies", "stats"] as const,
+    sharedInstructions: (companyId: string) => ["companies", companyId, "shared-instructions"] as const,
+    sharedInstructionsFile: (companyId: string, relativePath: string) =>
+      ["companies", companyId, "shared-instructions", "file", relativePath] as const,
   },
   companySkills: {
     list: (companyId: string) => ["company-skills", companyId] as const,
