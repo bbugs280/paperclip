@@ -1,7 +1,9 @@
-# FundStarter Tool Buildout — Todo
+# FundStarter Company Todo
 
-**Last updated:** 2026-04-12 (Phase 2 complete)  
-**Company:** FundStarter (`211243a4-3547-44fa-bc65-308b8982f5c8`)
+**Focus:** FundStarter agent company buildout — tools, plugins, agent configuration.  
+**Company ID:** `211243a4-3547-44fa-bc65-308b8982f5c8`
+
+**Last updated:** 2026-04-12 (Phase 2 complete)
 
 ---
 
@@ -48,34 +50,33 @@
 
 | # | Agent | Update | Phase | Status |
 |---|-------|--------|-------|--------|
-| A1 | Talent Scout (5da4ff53) | X API tools inline in AGENTS.md | Phase 1 | ✅ Done |
-| A2 | Research Analyst (0960a9d4) | Add X API (x-api:x-search per expert) | Phase 1 | ✅ Done |
-| A3 | Investment Strategist (7b14ebde) | Add web-search verification section | Phase 1 | ✅ Done |
-| A4 | Client Advisor (fb763109) | Add HK web-search research section | Phase 1 | ✅ Done |
-| A5 | Research Analyst (0960a9d4) | Add RSS feed tool section | Phase 2 (after P4) | ✅ Done |
-| A6 | Research Analyst (0960a9d4) | Add SEC EDGAR section | Phase 2 (after P5) | ✅ Done |
-| A7 | Investment Strategist (7b14ebde) | Upgrade verification with financial-data plugin | Phase 2 (after P3) | ✅ Done |
-| A8 | Client Advisor (fb763109) | Upgrade HK research with financial-data + hkex plugins | Phase 2 (after P3/P6) | ✅ Done (financial-data; P6/hkex still low priority) |
 
 ---
 
-## Phase Summary
+## Urgent (Priority 1)
 
-### Phase 1 — Quick Wins (no new plugins, working on now)
-- [x] A1 — Talent Scout X tools
-- [x] A2 — Research Analyst X tools
-- [x] A3 — Investment Strategist verification tools (web search)
-- [x] A4 — Client Advisor HK research tools (web search)
+- [ ] 
 
-### Phase 2 — New Plugins (COMPLETE)
-- [x] P3 — plugin-financial-data (built, installed, ID: b04ea985)
-- [x] P4 — plugin-rss-reader (built, installed, ID: c476defc)
-- [x] P5 — plugin-sec-edgar (built, installed, ID: 52789d53)
-- [ ] P6 — plugin-hkex (low priority — web search covers most of this)
-- [x] A5 — Research Analyst: rss-reader:fetch-finance-feeds (step 2)
-- [x] A6 — Research Analyst: sec-edgar:search-filings + get-13f-holdings (step 5)
-- [x] A7 — Investment Strategist: financial-data:stock-quote + stock-info + search-symbol
-- [x] A8 — Client Advisor: financial-data:stock-quote (HKD ticker) + currency-rate (USD/HKD)
+---
 
-### Out of Scope (for now)
-- Email / notification tool for daily brief delivery
+## Planned (Priority 2)
+
+- [ ] 
+
+---
+
+## Backlog
+
+- [ ] 
+
+---
+
+## Completed
+
+- [x] Phase 2 plugin buildout complete
+
+---
+
+## Notes
+
+Document FundStarter-specific work items, design decisions, and blockers here.

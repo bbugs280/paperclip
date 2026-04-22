@@ -1,0 +1,10 @@
+{
+  "name": "@bbugs280/plugin-x-api",
+  "version": "0.1.0",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "paperclip-plugin": {
+    "manifest": "dist/manifest.js"
+  }
+}

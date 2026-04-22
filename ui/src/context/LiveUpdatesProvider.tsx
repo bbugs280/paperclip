@@ -123,6 +123,7 @@ function resolveIssueToastContext(
   companyId: string,
   issueId: string,
   details: Record<string, unknown> | null,
+  issuePrefix: string | null = null,
 ): IssueToastContext {
   const issueRefs = resolveIssueQueryRefs(queryClient, companyId, issueId, details);
   const detailIssue = issueRefs
@@ -146,7 +147,9 @@ function resolveIssueToastContext(
     ref,
     title,
     label: title ? `${ref} - ${truncate(title, 72)}` : ref,
-    href: `/issues/${cachedIssue?.identifier ?? issueId}`,
+    href: issuePrefix 
+      ? `/${issuePrefix}/issues/${cachedIssue?.identifier ?? issueId}`
+      : `/issues/${cachedIssue?.identifier ?? issueId}`,
   };
 }
 
@@ -283,6 +286,7 @@ function buildActivityToast(
   companyId: string,
   payload: Record<string, unknown>,
   currentActor: { userId: string | null; agentId: string | null },
+  issuePrefix: string | null = null,
 ): ToastInput | null {
   const entityType = readString(payload.entityType);
   const entityId = readString(payload.entityId);
@@ -295,7 +299,7 @@ function buildActivityToast(
     return null;
   }
 
-  const issue = resolveIssueToastContext(queryClient, companyId, entityId, details);
+  const issue = resolveIssueToastContext(queryClient, companyId, entityId, details, issuePrefix);
   const actor = resolveActorLabel(queryClient, companyId, actorType, actorId);
   const isSelfActivity =
     (actorType === "user" && !!currentActor.userId && actorId === currentActor.userId) ||
@@ -611,6 +615,7 @@ function handleLiveEvent(
   pushToast: (toast: ToastInput) => string | null,
   gate: ToastGate,
   currentActor: { userId: string | null; agentId: string | null },
+  issuePrefix: string | null = null,
 ) {
   if (event.companyId !== expectedCompanyId) return;
 
@@ -658,7 +663,7 @@ function handleLiveEvent(
     invalidateActivityQueries(queryClient, expectedCompanyId, payload, currentActor);
     const action = readString(payload.action);
     const toast =
-      buildActivityToast(queryClient, expectedCompanyId, payload, currentActor) ??
+      buildActivityToast(queryClient, expectedCompanyId, payload, currentActor, issuePrefix) ??
       buildJoinRequestToast(payload);
     if (
       toast &&
@@ -803,7 +808,7 @@ export function LiveUpdatesProvider({ children }: { children: ReactNode }) {
           handleLiveEvent(queryClient, liveCompanyId, pathnameRef.current, parsed, pushToast, gateRef.current, {
             userId: currentActorRef.current.userId,
             agentId: currentActorRef.current.agentId,
-          });
+          }, selectedCompany?.issuePrefix ?? null);
         } catch {
           // Ignore non-JSON payloads.
         }
