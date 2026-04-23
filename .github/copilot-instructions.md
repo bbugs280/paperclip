@@ -77,4 +77,33 @@ grep "^\- \[ \]" todo-fundstarter.md
 ./paperclip-service.sh pause    # Disable autostart for development
 ./paperclip-service.sh resume   # Enable autostart when done
 ./paperclip-service.sh status   # Check service status
+
+## Doc rules (authoring vs generated)
+
+- `doc/` is the authoritative source-of-truth for editable, reviewable documentation and templates. Keep hand-authored content here and track it in git.
+- `docs/` is the published/site output (rendered site or website artifacts). Treat it as generated site content; do not edit `docs/` directly unless you are updating site assets intentionally.
+- `doc/generated/` is for exported, auto-generated, or company-private drafts and one-off exports. Files placed here should be ignored by git (add `doc/generated/` to `.gitignore`) and kept local to your instance or in a private storage location.
+
+When moving generated files out of `doc/` into `doc/generated/` use this pattern:
+
+```bash
+# create generated folder
+mkdir -p doc/generated/<subdir>
+
+# if file is tracked, copy then untrack
+cp doc/SomeGenerated.md doc/generated/<subdir>/SomeGenerated.md
+git rm --cached doc/SomeGenerated.md
+
+# if file is untracked, move directly
+mv doc/SomeGenerated.md doc/generated/<subdir>/
+
+# ensure generated is ignored
+grep -qxF 'doc/generated/' .gitignore || echo 'doc/generated/' >> .gitignore
+git add .gitignore
+git commit -m "chore(docs): move generated docs to doc/generated and ignore them"
+```
+
+Notes:
+- Keep `doc/` small and author-focused; store ephemeral or company-private drafts in `doc/generated/` or outside the repo (e.g., private cloud storage).
+- No service pause is required for `doc/` changes (see "No pause needed for:" in this file). If you modify `server/` or `packages/`, follow the pause/resume steps above.
 ```
