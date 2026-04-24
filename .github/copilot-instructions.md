@@ -106,4 +106,10 @@ git commit -m "chore(docs): move generated docs to doc/generated and ignore them
 Notes:
 - Keep `doc/` small and author-focused; store ephemeral or company-private drafts in `doc/generated/` or outside the repo (e.g., private cloud storage).
 - No service pause is required for `doc/` changes (see "No pause needed for:" in this file). If you modify `server/` or `packages/`, follow the pause/resume steps above.
+
+## AI-generated Markdown rule
+
+- All Markdown files ("*.md") produced or substantially authored by AI agents or automated exports MUST be placed under `doc/generated/` and should not be committed to the main authoring tree in `doc/`.
+- If an AI produces or updates a draft in `doc/`, move it to `doc/generated/` (or copy+untrack) and follow the move pattern above. Treat `doc/generated/` as local/export-only storage.
+
 ```
