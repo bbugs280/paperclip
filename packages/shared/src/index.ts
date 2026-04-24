@@ -451,6 +451,19 @@ export {
   type ResetAgentSession,
   type TestAdapterEnvironment,
   type UpdateAgentPermissions,
+} from "./validators/index.js";
+
+export {
+  PLUGIN_REGISTRY,
+  getPluginDefinition,
+  listAvailablePlugins,
+  getRequiredSecretsForPlugins,
+  validatePluginSecretsAvailable,
+  type PluginDefinition,
+  type PluginSecretBinding,
+} from "./plugin-registry.js";
+
+export {
   createProjectSchema,
   updateProjectSchema,
   createProjectWorkspaceSchema,

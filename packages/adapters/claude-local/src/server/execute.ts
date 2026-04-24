@@ -363,6 +363,17 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   if (sharedInstructions) {
     combinedInstructionsContents = (combinedInstructionsContents ?? "") + sharedInstructions;
   }
+
+  // System-wise fix for bash tool workdir validation: ensure Claude always provides
+  // a valid working directory when calling bash tools. This prevents schema validation
+  // errors where workdir is required but explicitly set to null.
+  const bashToolWorkdirInstruction =
+    `\n\n## Bash Tool Working Directory\n` +
+    `When using the bash tool, ALWAYS include a workdir parameter set to the current working directory. ` +
+    `The current working directory for this execution is: **${cwd}**\n` +
+    `Example: when calling bash, use workdir: "${cwd}" (or omit workdir entirely to let the bash tool use the default, ` +
+    `but never pass workdir: null or workdir: undefined).`;
+  combinedInstructionsContents = (combinedInstructionsContents ?? "") + bashToolWorkdirInstruction;
   const promptBundle = await prepareClaudePromptBundle({
     companyId: agent.companyId,
     skills: claudeSkillEntries.filter((entry) => desiredSkillNames.has(entry.key)),

@@ -167,7 +167,7 @@ async function getWorkspaceInheritanceIssue(
     .where(and(eq(issues.id, issueId), eq(issues.companyId, companyId)))
     .then((rows) => rows[0] ?? null);
   if (!issue) {
-    throw notFound("Workspace inheritance issue not found");
+    throw notFound(`Workspace inheritance issue not found: issueId=${issueId}, companyId=${companyId}`);
   }
   return issue;
 }
@@ -579,7 +579,7 @@ export function issueService(db: Db) {
       .where(eq(agents.id, agentId))
       .then((rows) => rows[0] ?? null);
 
-    if (!assignee) throw notFound("Assignee agent not found");
+    if (!assignee) throw notFound(`Assignee agent not found: agentId=${agentId}, companyId=${companyId}`);
     if (assignee.companyId !== companyId) {
       throw unprocessable("Assignee must belong to same company");
     }
@@ -605,7 +605,7 @@ export function issueService(db: Db) {
       )
       .then((rows) => rows[0] ?? null);
     if (!membership) {
-      throw notFound("Assignee user not found");
+      throw notFound(`Assignee user not found: userId=${userId}, companyId=${companyId}`);
     }
   }
 
@@ -624,7 +624,7 @@ export function issueService(db: Db) {
       .from(projectWorkspaces)
       .where(eq(projectWorkspaces.id, projectWorkspaceId))
       .then((rows) => rows[0] ?? null);
-    if (!workspace) throw notFound("Project workspace not found");
+    if (!workspace) throw notFound(`Project workspace not found: projectWorkspaceId=${projectWorkspaceId}, companyId=${companyId}`);
     if (workspace.companyId !== companyId) throw unprocessable("Project workspace must belong to same company");
     if (projectId && workspace.projectId !== projectId) {
       throw unprocessable("Project workspace must belong to the selected project");
@@ -646,7 +646,7 @@ export function issueService(db: Db) {
       .from(executionWorkspaces)
       .where(eq(executionWorkspaces.id, executionWorkspaceId))
       .then((rows) => rows[0] ?? null);
-    if (!workspace) throw notFound("Execution workspace not found");
+    if (!workspace) throw notFound(`Execution workspace not found: executionWorkspaceId=${executionWorkspaceId}, companyId=${companyId}`);
     if (workspace.companyId !== companyId) throw unprocessable("Execution workspace must belong to same company");
     if (projectId && workspace.projectId !== projectId) {
       throw unprocessable("Execution workspace must belong to the selected project");

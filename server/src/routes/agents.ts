@@ -44,6 +44,11 @@ import {
   syncInstructionsBundleConfigFromFilePath,
   workspaceOperationService,
 } from "../services/index.js";
+import { resolvePluginSecrets } from "../services/plugin-secret-resolver.js";
+import {
+  getInstructionVersionMetadata,
+  incrementInstructionVersion,
+} from "../services/instruction-versioning.js";
 import { conflict, forbidden, notFound, unprocessable } from "../errors.js";
 import { assertBoard, assertCompanyAccess, assertInstanceAdmin, getActorInfo } from "./authz.js";
 import {
@@ -1465,6 +1470,7 @@ export function agentRoutes(db: Db) {
 
     const {
       desiredSkills: requestedDesiredSkills,
+      plugins: requestedPlugins,
       ...createInput
     } = req.body;
     createInput.adapterType = assertKnownAdapterType(createInput.adapterType);
@@ -1472,10 +1478,33 @@ export function agentRoutes(db: Db) {
       createInput.adapterType,
       ((createInput.adapterConfig ?? {}) as Record<string, unknown>),
     );
+
+    // Resolve plugin secrets if plugins array is provided
+    let adapterConfigWithPlugins = requestedAdapterConfig;
+    if (Array.isArray(requestedPlugins) && requestedPlugins.length > 0) {
+      const pluginResolution = await resolvePluginSecrets(db, {
+        companyId,
+        plugins: requestedPlugins,
+        existingEnv: (requestedAdapterConfig.env ?? {}) as Record<string, unknown>,
+        strictMode: false, // Allow partial resolution (missing optional secrets are skipped)
+      });
+
+      adapterConfigWithPlugins = {
+        ...requestedAdapterConfig,
+        env: pluginResolution.env,
+      };
+
+      // Store resolved plugins in metadata for tracking
+      if (!createInput.metadata) {
+        createInput.metadata = {};
+      }
+      (createInput.metadata as Record<string, unknown>).resolvedPlugins = pluginResolution.resolvedPlugins;
+    }
+
     const desiredSkillAssignment = await resolveDesiredSkillAssignment(
       companyId,
       createInput.adapterType,
-      requestedAdapterConfig,
+      adapterConfigWithPlugins,
       Array.isArray(requestedDesiredSkills) ? requestedDesiredSkills : undefined,
     );
     const normalizedAdapterConfig = await secretsSvc.normalizeAdapterConfigForPersistence(
@@ -1635,9 +1664,24 @@ export function agentRoutes(db: Db) {
       { strictMode: strictSecretsMode },
     );
     const actor = getActorInfo(req);
+    
+    // Track instruction version change
+    const currentVersionMeta = getInstructionVersionMetadata(existing);
+    const updatedVersionMeta = incrementInstructionVersion(currentVersionMeta, {
+      actor: { userId: actor.actorType === "user" ? actor.actorId : null, agentId: actor.agentId },
+      description: `Instructions path updated to ${req.body.path ?? "cleared"}`,
+      changeType: "updated",
+    });
+    
     const agent = await svc.update(
       id,
-      { adapterConfig: normalizedAdapterConfig },
+      {
+        adapterConfig: normalizedAdapterConfig,
+        metadata: {
+          ...(existing.metadata as Record<string, unknown>),
+          instructionVersion: updatedVersionMeta,
+        },
+      },
       {
         recordRevision: {
           createdByAgentId: actor.agentId,
@@ -1773,9 +1817,24 @@ export function agentRoutes(db: Db) {
       result.adapterConfig,
       { strictMode: strictSecretsMode },
     );
+    
+    // Track instruction version change
+    const currentVersionMeta = getInstructionVersionMetadata(existing);
+    const updatedVersionMeta = incrementInstructionVersion(currentVersionMeta, {
+      actor: { userId: actor.actorType === "user" ? actor.actorId : null, agentId: actor.agentId },
+      description: `Updated instruction file: ${req.body.path}`,
+      changeType: "updated",
+    });
+    
     await svc.update(
       id,
-      { adapterConfig: normalizedAdapterConfig },
+      {
+        adapterConfig: normalizedAdapterConfig,
+        metadata: {
+          ...(existing.metadata as Record<string, unknown>),
+          instructionVersion: updatedVersionMeta,
+        },
+      },
       {
         recordRevision: {
           createdByAgentId: actor.agentId,
@@ -2153,13 +2212,29 @@ export function agentRoutes(db: Db) {
       return;
     }
 
+    // Auto-populate taskId from agent's assigned issue if not already in context
+    const contextSnapshot: Record<string, unknown> = {
+      triggeredBy: req.actor.type,
+      actorId: req.actor.type === "agent" ? req.actor.agentId : req.actor.userId,
+    };
+
+    // Only query for assigned issue if taskId not explicitly provided
+    if (!contextSnapshot.taskId && !contextSnapshot.issueId) {
+      const issuesSvc = issueService(db);
+      const assignedIssues = await issuesSvc.list(agent.companyId, {
+        assigneeAgentId: id,
+        status: "todo,in_progress,in_review,blocked",
+        limit: 1,
+      });
+      if (assignedIssues.length > 0) {
+        contextSnapshot.taskId = assignedIssues[0].id;
+      }
+    }
+
     const run = await heartbeat.invoke(
       id,
       "on_demand",
-      {
-        triggeredBy: req.actor.type,
-        actorId: req.actor.type === "agent" ? req.actor.agentId : req.actor.userId,
-      },
+      contextSnapshot,
       "manual",
       {
         actorType: req.actor.type === "agent" ? "agent" : "user",

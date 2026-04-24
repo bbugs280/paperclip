@@ -24,6 +24,372 @@
 
 ---
 
+## Plugin Credential Validation (BEFORE Agent Assignment)
+
+**CRITICAL**: Agents that use plugins (tools) MUST have all required credentials available before being assigned tasks. Failure to validate causes silent failures and wasted work.
+
+### Why This Matters
+
+Each plugin requires environment variables:
+- `web-search` → needs `TAVILY_API_KEY`
+- `x-api` → needs `X_BEARER_TOKEN`
+- `bitly` → needs `BITLY_ACCESS_TOKEN`
+- `slack` → needs `SLACK_WEBHOOK_URL`
+
+If an agent's instructions mention a plugin but the secret is NOT in the agent's `adapterConfig.env`, the plugin will fail with a cryptic error at runtime.
+
+**Real example from NWV-7**: Research Analyst tried to use `web-search` plugin → but Tavily API key wasn't provisioned as a company secret → agent marked blocked, no clear error message.
+
+### Pre-Assignment Validation Checklist
+
+**When creating or updating an agent:**
+
+1. **Scan instructions for plugin mentions**
+   ```bash
+   grep -i "web-search\|bitly\|slack\|x-api\|web-crawl" AGENTS.md
+   ```
+
+2. **For each plugin found, create a security table in instructions:**
+   ```markdown
+   ## 🔑 Required Secrets
+   
+   | Plugin | Environment Var | Secret Name | Status |
+   |--------|-----------------|------------|--------|
+   | web-search | TAVILY_API_KEY | tavily_api_key | ✅ Provisioned |
+   | x-api | X_BEARER_TOKEN | x_bearer_token | ✅ Provisioned |
+   ```
+
+3. **Verify all secrets exist in company**
+   ```bash
+   COMPANY_ID="..."
+   curl -s http://localhost:3100/api/companies/$COMPANY_ID/secrets \
+     -H "Authorization: Bearer test-key" | jq '.[] | {name, id}'
+   ```
+
+4. **Add ALL secrets to agent's env config**
+   ```json
+   {
+     "adapterConfig": {
+       "env": {
+         "TAVILY_API_KEY": {
+           "type": "secret_ref",
+           "secretId": "2f767de6-...",
+           "version": "latest"
+         },
+         "X_BEARER_TOKEN": {
+           "type": "secret_ref",
+           "secretId": "abc123...",
+           "version": "latest"
+         }
+       }
+     }
+   }
+   ```
+
+5. **Test immediately on first assignment**
+   - Don't wait for scheduled heartbeat
+   - Manually trigger a run on a simple task
+   - Watch for "invalid secret reference" or "plugin not found" errors
+   - If error occurs, fix before assigning critical tasks
+
+### Creating Missing Secrets (Quick Reference)
+
+```bash
+# Example: Create Tavily API Key secret
+curl -X POST http://localhost:3100/api/companies/{COMPANY_ID}/secrets \
+  -H "Authorization: Bearer test-key" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "tavily_api_key",
+    "provider": "local_encrypted",
+    "value": "tvly-dev-[YOUR_KEY]"
+  }'
+```
+
+### Red Flags (Don't Do These)
+
+| ❌ WRONG | ✅ RIGHT |
+|---------|----------|
+| Create agent without scanning for plugin usage | Audit instructions first, list all plugins, create secrets |
+| Add secret to company but NOT to agent's env | Add `secret_ref` entry to agent's `adapterConfig.env` |
+| Mention plugin in instructions with no setup docs | Include "Required Secrets" table showing which secrets are pre-configured |
+| Test later (wait for heartbeat) | Test immediately after assignment with manual task trigger |
+| Assume global env vars are available | Always verify agent's `env` config holds the references |
+
+### Documentation (Add to Every Agent Using Plugins)
+
+In agent instructions, add this section at the top:
+
+```markdown
+## 🔐 Plugin Configuration
+
+This agent uses external plugins that require API credentials.
+
+**All required secrets are pre-configured:**
+- ✅ Tavily (`web-search`, `web-crawl`): `TAVILY_API_KEY`
+- ✅ X/Twitter (`x-api`): `X_BEARER_TOKEN`
+- ✅ Slack: `SLACK_WEBHOOK_URL` (webhook-based, no token needed)
+
+**Status**: ✅ Ready to use — no additional setup required
+
+If you see errors like "Invalid secret reference" or "Plugin not found," report to platform ops immediately.
+```
+
+---
+
+## System: Plugin Config Architecture (CRITICAL SETUP REQUIREMENT)
+
+**STATUS**: Architectural design - plugin config fields reference secret UUIDs, NOT raw keys or names
+
+### The Correct Pattern
+
+Global plugin settings store **secret UUIDs** (not raw keys, not secret names):
+
+**Global Plugin Settings** (CORRECT):
+```json
+{
+  "provider": "tavily",
+  "maxResults": 5,
+  "tavilyApiKeyRef": "2f767de6-4869-48b7-b2f4-a3578fd9b535",
+  "xApiKeyRef": "7bb6425f-1605-4f65-a90a-4c24337796b5",
+  "googleApiKeyRef": "12345678-1234-1234-1234-123456789012",
+  "googleEngineIdRef": "87654321-4321-4321-4321-210987654321"
+}
+```
+
+### Why UUIDs, Not Names or Raw Keys?
+
+1. **Plugin schema declares `format: "secret-ref"`** on these fields
+2. Paperclip validates all values match UUID pattern at config save time
+3. At runtime, plugin calls `ctx.secrets.resolve(uuidValue)` → Paperclip looks up the UUID → returns decrypted value
+4. Raw keys (e.g., `tvly-dev-...`) fail UUID validation with "Invalid secret reference"
+5. Secret names (e.g., `tavily_api_key`) also fail UUID validation
+
+### Setup Flow (Correct Order)
+
+1. **Create company secrets** (identifies them in the store):
+   ```bash
+   curl -X POST /api/companies/{ID}/secrets \
+     -d '{ "name": "tavily_api_key", "value": "tvly-dev-..." }'
+   # Response includes secretId: "2f767de6-..."
+   ```
+
+2. **Get secret UUIDs from company secrets list**:
+   ```bash
+   curl /api/companies/{ID}/secrets
+   # Shows all names + IDs
+   ```
+
+3. **Configure plugin with those UUIDs**:
+   ```bash
+   curl -X POST /api/plugins/{pluginId}/config \
+     -d '{
+       "configJson": {
+         "tavilyApiKeyRef": "2f767de6-4869-48b7-b2f4-a3578fd9b535"
+       }
+     }'
+   ```
+
+4. **Plugin runtime resolves UUIDs → decrypted values**:
+   - Plugin loads config with UUID
+   - Plugin calls `ctx.secrets.resolve("2f767de6-...")`  
+   - Paperclip looks up UUID → finds secret → decrypts value
+   - Plugin gets the real API key
+
+### Common Mistakes (❌ Don't Do These)
+
+| ❌ WRONG | Why | ✅ CORRECT |
+|---------|-----|-----------|
+| `tavilyApiKeyRef: "tvly-dev-xxx"` | Raw key fails UUID validation | `tavilyApiKeyRef: "2f767de6-..."` |
+| `tavilyApiKeyRef: "tavily_api_key"` | Secret name fails UUID validation | Use the secret's UUID ID |
+| Configure plugin, skip creating secrets | Plugin tries to resolve non-existent UUID | Create secret first, use its UUID |
+| Assume agent env overrides plugin config | Agent env ignored for plugins | Plugin tools use ONLY global config |
+
+### Error: "Invalid secret reference: [value]"
+
+**Cause**: The value in plugin config field doesn't match UUID pattern
+
+**Fix**: 
+1. Get list of company secrets: `GET /api/companies/{ID}/secrets`
+2. Find the secret you need, copy its `id` field
+3. Update plugin config with that UUID, not the name or key value
+
+---
+
+## Error Escalation Protocol (CRITICAL)
+
+**PURPOSE**: When infrastructure or API errors occur, agents MUST escalate in a structured way instead of retrying blindly or failing silently.
+
+**PRINCIPLE**: Errors fall into two categories:
+- **Transient** (5xx errors, timeouts, network blips) → **RETRY** (automatic backoff)
+- **Structural** (4xx errors, malformed requests, invalid references) → **ESCALATE** (stop work, post comment)
+
+### Decision Tree
+
+```
+Error occurs (API call fails, plugin error, etc.)
+
+Is it a 5xx status code (500, 502, 503, 504)?
+├─ YES → Retry up to 3x with exponential backoff (1s, 2s, 4s)
+│         If still fails after 3 retries → Go to "Escalate"
+└─ NO → Check next
+
+Is it a 4xx status code (400, 401, 403, 404, 422)?
+├─ YES → Go to "Escalate" (structural error, retrying won't help)
+└─ NO → Check next
+
+Is it a plugin error (tool not found, invalid secret, etc.)?
+├─ YES → Go to "Escalate" (infrastructure issue)
+└─ NO → Treat as unknown error → Escalate
+```
+
+### Escalate: Structured Error Posting
+
+When escalating, **ALWAYS** post in this format:
+
+```markdown
+🚨 **ERROR ESCALATION** — Work blocked on [Step Name]
+
+**Error Type**: [API error | Plugin error | Timeout | Invalid reference | etc.]
+
+**Endpoint**: [URL that failed]
+```
+GET /api/issues/629c0ffb.../documents/edition-3.md
+```
+
+**HTTP Status**: [code and reason]
+```
+404 Not Found
+```
+
+**Response Body**:
+```
+[Full error response from server, if available]
+```
+
+**Attempted Fix**:
+- Retried 3x with backoff: ❌ Still fails
+- Checked configuration: [What I checked and result]
+
+**Next Steps**: 
+- Cannot proceed without human intervention
+- This issue is blocked and requires platform ops review
+
+**Required Action**: Verify API endpoint, check if secret is provisioned, check if resource exists
+```
+
+Then **ALWAYS DO THIS**:
+1. Post the comment above
+2. Update issue status to `blocked` with reason: "API error on [endpoint]"
+3. **STOP EXECUTION** — DO NOT RETRY, DO NOT GUESS, DO NOT CONTINUE
+
+### Anti-Patterns (❌ Don't Do This)
+
+| ❌ WRONG | ✅ RIGHT |
+|---------|----------|
+| Retry forever if API fails | Retry 3x for 5xx, escalate on 4xx immediately |
+| Fail silently with no comment | Post structured error comment before stopping |
+| Guess what the error means | Quote the actual error response |
+| Try workarounds (hardcode URLs, guess different endpoints) | Post error and wait for human review |
+| Mark task done despite errors | Mark blocked with error details |
+| Continue with next step even though previous failed | Stop execution, escalate, wait |
+
+### Real Example: Correct Error Escalation
+
+**Scenario**: Promoter agent tries to update issue with document, gets 404
+
+**WRONG** ❌:
+```
+Comment: "Got error. Trying different endpoint."
+→ Tries 10 different endpoint variations
+→ Still fails
+→ Marks done anyway
+```
+
+**RIGHT** ✅:
+```
+Comment:
+🚨 **ERROR ESCALATION** — Work blocked on Document Update
+
+**Error Type**: API route not found
+
+**Endpoint**:
+```
+PATCH /api/companies/bf8c322a-ed79-4421-9fff-b4be5ee9a148/issues/629c0ffb-a6dc-4e54-b16c-63dc09f14c9b
+```
+
+**HTTP Status**: 404 Not Found
+
+**Response Body**:
+```
+{"status": 404, "error": "Route not found"}
+```
+
+**Attempted Fix**:
+- Retried 3x with backoff: ❌ Still 404
+- Checked: Uses correct company ID: ✅
+- Checked: Issue ID is valid: ✅
+
+**Next Steps**: 
+- API path may have changed. See doc/API_PATH_REFERENCE.md
+- Correct path might be: `PATCH /api/issues/{id}` (without company prefix)
+- Cannot proceed; blocked on infrastructure clarification.
+
+Status: blocked
+```
+
+Then manual fix (human or ops checks): Yes, wrong path! Should be `/api/issues/{id}`.
+
+Agent retries with correct path: ✅ Works
+
+### What Happens After Escalation?
+
+When an issue is marked `blocked` with error escalation:
+
+1. **Platform monitors** see blocked issues (ops dashboard)
+2. **Human ops** reads the structured error comment
+3. **Human ops** either:
+   - Fixes infrastructure (creates missing secret, fixes API route)
+   - Fixes agent config (adds missing env var, corrects endpoint)
+   - Escalates to engineering (reports API bug)
+4. **Agent can proceed** once fix is in place (operator resumes agent or marks issue unblocked)
+
+### Error Escalation Template (Copy & Paste)
+
+```markdown
+🚨 **ERROR ESCALATION** — Work blocked on [STEP NAME]
+
+**Error Type**: [Type]
+
+**Endpoint**:
+​```
+[Full URL]
+​```
+
+**HTTP Status**: [Code]
+
+**Response Body**:
+​```
+[Full error response]
+​```
+
+**Attempted Fix**:
+- Retried [N]x with backoff: [Result]
+- Checked [condition]: [Result]
+
+**Next Steps**: [What needs to happen to unblock]
+
+**Requires**: Human ops review
+```
+
+Then:
+1. Post comment using template above
+2. Status: `blocked`
+3. Reassign to ops or platform team
+4. Stop execution
+
+---
+
 ## Standard Agent Instructions Pattern
 
 All agent instructions should follow this structure:
