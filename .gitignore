@@ -57,3 +57,18 @@ paperclip.log
 paperclip-error.log
 doc/generated/
 doc/private/
+
+# Environment and secrets
+.env.local
+.env.*.local
+.env.development.local
+.env.test.local
+.env.production.local
+*.pem
+*.key
+*.pfx
+.aws/
+.config/
+credentials*
+secrets*
+token*
