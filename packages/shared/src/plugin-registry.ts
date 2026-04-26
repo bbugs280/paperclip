@@ -87,7 +87,7 @@ export const PLUGIN_REGISTRY: Record<string, PluginDefinition> = {
     requiredSecrets: [
       {
         envVar: "GITHUB_TOKEN",
-        secretName: "github_token",
+        secretName: "GITHUB_PAT",
         required: true,
       },
     ],

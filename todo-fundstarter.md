@@ -3,7 +3,7 @@
 **Focus:** FundStarter agent company buildout — tools, plugins, agent configuration.  
 **Company ID:** `211243a4-3547-44fa-bc65-308b8982f5c8`
 
-**Last updated:** 2026-04-12 (Phase 2 complete)
+**Last updated:** 2026-04-25 (Phase 3 — routines + WhatsApp delivery complete)
 
 ---
 
@@ -55,25 +55,39 @@
 
 ## Urgent (Priority 1)
 
-- [ ] 
+- [ ] Add Vincent's actual portfolio holdings to `client-vincent` document in FUN-81
+- [ ] Consider switching `dmPolicy` from `allowlist` → `open` so clients can reply to briefs without per-number config (see analysis: outbound works regardless, only inbound is gated)
 
 ---
 
 ## Planned (Priority 2)
 
-- [ ] 
+- [ ] Build plugin-hkex (P6) — low priority, web search covers most today
+- [ ] Add agent prompt update table entries now that all 6 agents have AGENTS.md
 
 ---
 
 ## Backlog
 
-- [ ] 
+- [ ] Dedicated FundStarter WhatsApp number (WAHA) — only if sending from personal number becomes a problem at scale
 
 ---
 
 ## Completed
 
-- [x] Phase 2 plugin buildout complete
+- [x] Phase 2 plugin buildout complete (P1–P5 installed)
+- [x] Client Registry (FUN-81) created — permanent standing issue, Client Advisor owns it
+- [x] Client document template (`client-example`) with portfolio holdings table
+- [x] Portfolio Manager agent created — daily price updates, reports to Client Advisor
+- [x] Backtesting Agent created — weekly accuracy scoring, reports to Investment Strategist
+- [x] All 6 reporting lines set in Paperclip API
+- [x] All 6 agents set to `github-copilot/gpt-5-mini`
+- [x] Daily Portfolio Pricing routine — cron `30 22 * * *` (22:30 UTC = 6:30am HKT)
+- [x] Weekly Backtesting Run routine — cron `0 0 * * 1` (Monday 00:00 UTC = 8am HKT)
+- [x] WhatsApp delivery added to Client Advisor AGENTS.md (sends brief summary per active client)
+- [x] `dmPolicy` changed to `allowlist`; `allowFrom` seeded with Vincent's number
+- [x] Client `client-vincent` registered in FUN-81 (WhatsApp: +85260780428)
+- [x] WhatsApp delivery tested — message confirmed delivered to Vincent
 
 ---
 

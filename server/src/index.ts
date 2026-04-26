@@ -617,6 +617,18 @@ export async function startServer(): Promise<StartedServer> {
         .catch((err) => {
           logger.error({ err }, "periodic heartbeat recovery failed");
         });
+
+      // Reap issues stuck in_progress with no active execution for > 2 hours.
+      void heartbeat
+        .reapOrphanedIssues()
+        .then((result) => {
+          if (result.reaped > 0) {
+            logger.warn({ ...result }, "periodic issue reaper reset zombie in_progress issues");
+          }
+        })
+        .catch((err) => {
+          logger.error({ err }, "periodic orphaned issue reap failed");
+        });
     }, config.heartbeatSchedulerIntervalMs);
   }
   

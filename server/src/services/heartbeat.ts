@@ -2,7 +2,7 @@ import fs from "node:fs/promises";
 import path from "node:path";
 import { execFile as execFileCallback } from "node:child_process";
 import { promisify } from "node:util";
-import { and, asc, desc, eq, gt, inArray, isNull, or, sql } from "drizzle-orm";
+import { and, asc, desc, eq, gt, inArray, isNull, lt, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import type { BillingType, ExecutionWorkspace, ExecutionWorkspaceConfig } from "@paperclipai/shared";
 import {
@@ -2504,6 +2504,89 @@ export function heartbeatService(db: Db) {
     return { reaped: reaped.length, runIds: reaped };
   }
 
+  // Reap issues that are stuck in `in_progress` with no active execution lock and no live
+  // checkout run. This can happen when a run finishes (or crashes) without transitioning the
+  // issue — e.g. the PM agent set status but never posted a done/blocked update, or the
+  // process was killed mid-flight. After `staleThresholdMs` of inactivity the issue is reset
+  // to `todo` so the assignee agent can pick it up cleanly on the next heartbeat.
+  async function reapOrphanedIssues(opts?: { staleThresholdMs?: number }) {
+    const staleThresholdMs = opts?.staleThresholdMs ?? 2 * 60 * 60 * 1000; // default: 2 hours
+    const cutoff = new Date(Date.now() - staleThresholdMs);
+
+    // Find in_progress issues that have no active execution lock and whose
+    // checkoutRunId (if set) belongs to a terminal run.
+    const candidates = await db
+      .select({
+        id: issues.id,
+        identifier: issues.identifier,
+        companyId: issues.companyId,
+        assigneeAgentId: issues.assigneeAgentId,
+        checkoutRunId: issues.checkoutRunId,
+        updatedAt: issues.updatedAt,
+        runStatus: heartbeatRuns.status,
+      })
+      .from(issues)
+      .leftJoin(heartbeatRuns, eq(issues.checkoutRunId, heartbeatRuns.id))
+      .where(
+        and(
+          eq(issues.status, "in_progress"),
+          isNull(issues.executionRunId),
+          isNull(issues.executionLockedAt),
+          lt(issues.updatedAt, cutoff),
+          or(
+            isNull(issues.checkoutRunId),
+            inArray(heartbeatRuns.status, ["succeeded", "failed", "cancelled", "timed_out"]),
+          ),
+        ),
+      );
+
+    if (candidates.length === 0) return { reaped: 0, issueIds: [] as string[] };
+
+    const reaped: string[] = [];
+    const now = new Date();
+
+    for (const issue of candidates) {
+      const updated = await db
+        .update(issues)
+        .set({
+          status: "todo",
+          checkoutRunId: null,
+          updatedAt: now,
+        })
+        .where(
+          and(
+            eq(issues.id, issue.id),
+            eq(issues.status, "in_progress"),
+            isNull(issues.executionRunId),
+            isNull(issues.executionLockedAt),
+          ),
+        )
+        .returning({ id: issues.id })
+        .then((rows) => rows[0] ?? null);
+
+      if (updated) {
+        reaped.push(issue.id);
+        logger.warn(
+          {
+            issueId: issue.id,
+            identifier: issue.identifier,
+            companyId: issue.companyId,
+            assigneeAgentId: issue.assigneeAgentId,
+            checkoutRunId: issue.checkoutRunId,
+            checkoutRunStatus: issue.runStatus ?? null,
+            updatedAt: issue.updatedAt,
+          },
+          `reapOrphanedIssues: reset ${issue.identifier ?? issue.id} to todo (zombie in_progress)`,
+        );
+      }
+    }
+
+    if (reaped.length > 0) {
+      logger.warn({ reapedCount: reaped.length, issueIds: reaped }, "reaped orphaned in_progress issues");
+    }
+    return { reaped: reaped.length, issueIds: reaped };
+  }
+
   async function resumeQueuedRuns() {
     const queuedRuns = await db
       .select({ agentId: heartbeatRuns.agentId })
@@ -4571,6 +4654,8 @@ export function heartbeatService(db: Db) {
     reportRunActivity: clearDetachedRunWarning,
 
     reapOrphanedRuns,
+
+    reapOrphanedIssues,
 
     resumeQueuedRuns,
 

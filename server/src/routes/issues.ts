@@ -518,11 +518,63 @@ export function issueRoutes(
     }
   });
 
-  // Common malformed path when companyId is empty in "/api/companies/{companyId}/issues".
-  router.get("/issues", (_req, res) => {
-    res.status(400).json({
-      error: "Missing companyId in path. Use /api/companies/{companyId}/issues.",
-    });
+  // Support two forms for listing issues:
+  //  - /api/companies/{companyId}/issues (preferred)
+  //  - /api/issues?companyId={companyId}&...  (convenience for clients that build query strings)
+  // If no companyId is provided on the top-level path, return a helpful 400 error.
+  router.get("/issues", async (req, res) => {
+    const companyIdQuery = typeof req.query.companyId === "string" && req.query.companyId.trim().length > 0
+      ? req.query.companyId.trim()
+      : null;
+
+    if (!companyIdQuery) {
+      res.status(400).json({
+        error: "Missing companyId. Use /api/companies/{companyId}/issues or add ?companyId={id} to this path.",
+      });
+      return;
+    }
+
+    // Delegate to the same service logic used by the company-scoped route so behaviour is identical.
+    try {
+      assertCompanyAccess(req, companyIdQuery);
+      const rawLimit = req.query.limit as string | undefined;
+      const parsedLimit = rawLimit ? Number.parseInt(rawLimit, 10) : null;
+      const limit = parsedLimit ?? undefined;
+
+      if (rawLimit !== undefined && (parsedLimit === null || !Number.isInteger(parsedLimit) || parsedLimit <= 0)) {
+        res.status(400).json({ error: "limit must be a positive integer" });
+        return;
+      }
+
+      const result = await svc.list(companyIdQuery, {
+        status: req.query.status as string | undefined,
+        assigneeAgentId: req.query.assigneeAgentId as string | undefined,
+        participantAgentId: req.query.participantAgentId as string | undefined,
+        assigneeUserId: req.query.assigneeUserId as string | undefined,
+        touchedByUserId: req.query.touchedByUserId as string | undefined,
+        inboxArchivedByUserId: req.query.inboxArchivedByUserId as string | undefined,
+        unreadForUserId: req.query.unreadForUserId as string | undefined,
+        projectId: req.query.projectId as string | undefined,
+        executionWorkspaceId: req.query.executionWorkspaceId as string | undefined,
+        parentId: req.query.parentId as string | undefined,
+        labelId: req.query.labelId as string | undefined,
+        originKind: req.query.originKind as string | undefined,
+        originId: req.query.originId as string | undefined,
+        includeRoutineExecutions:
+          req.query.includeRoutineExecutions === "true" || req.query.includeRoutineExecutions === "1",
+        q: req.query.q as string | undefined,
+        limit,
+      });
+      res.json(result);
+    } catch (err) {
+      // Mirror other routes' behaviour for auth/error handling
+      if (err instanceof HttpError) {
+        res.status(err.status).json({ error: err.message });
+        return;
+      }
+      logger.error({ err }, "error listing issues via top-level /issues with companyId");
+      res.status(500).json({ error: "Internal server error" });
+    }
   });
 
   router.get("/companies/:companyId/issues", async (req, res) => {

@@ -861,14 +861,24 @@ export function issueService(db: Db) {
     );
   }
 
+  // A run is considered stale if it is in a terminal status, missing from the DB, or has been
+  // stuck in a non-terminal status for longer than STALE_RUN_GRACE_MS (default 2 hours).
+  // This prevents live runs from blocking lock adoption while still protecting truly active runs.
+  const STALE_RUN_GRACE_MS = 2 * 60 * 60 * 1000;
+
   async function isTerminalOrMissingHeartbeatRun(runId: string) {
     const run = await db
-      .select({ status: heartbeatRuns.status })
+      .select({ status: heartbeatRuns.status, startedAt: heartbeatRuns.startedAt })
       .from(heartbeatRuns)
       .where(eq(heartbeatRuns.id, runId))
       .then((rows) => rows[0] ?? null);
     if (!run) return true;
-    return TERMINAL_HEARTBEAT_RUN_STATUSES.has(run.status);
+    if (TERMINAL_HEARTBEAT_RUN_STATUSES.has(run.status)) return true;
+    // Treat a non-terminal run as stale when it has been running past the grace period.
+    // This handles the case where a process crashed before marking itself terminal.
+    const refTime = run.startedAt ?? null;
+    if (refTime && Date.now() - new Date(refTime).getTime() > STALE_RUN_GRACE_MS) return true;
+    return false;
   }
 
   async function adoptStaleCheckoutRun(input: {

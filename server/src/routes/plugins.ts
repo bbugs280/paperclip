@@ -38,6 +38,7 @@ import {
 import { pluginRegistryService } from "../services/plugin-registry.js";
 import { pluginLifecycleManager } from "../services/plugin-lifecycle.js";
 import { getPluginUiContributionMetadata, pluginLoader } from "../services/plugin-loader.js";
+import { secretService } from "../services/secrets.js";
 import { logActivity } from "../services/activity-log.js";
 import { publishGlobalLiveEvent } from "../services/live-events.js";
 import type { PluginJobScheduler } from "../services/plugin-job-scheduler.js";
@@ -299,6 +300,57 @@ interface PluginToolExecuteRequest {
  * @param bridgeDeps - Optional bridge proxy dependencies for getData/performAction
  * @returns Express router with plugin routes mounted
  */
+
+// UUID v4 pattern — used to distinguish raw token values from secret-ref IDs
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
+
+/**
+ * Declarative map of plugin configJson field names → company secret names.
+ * When a plugin config is saved and a field contains a raw token (not a UUID),
+ * and the config also contains a `targetCompanyId`, the token is automatically
+ * upserted into that company's secrets registry under the canonical name.
+ *
+ * This prevents the dual-storage divergence where users update a plugin token
+ * in the UI but agents still read a stale value from company secrets.
+ */
+const PLUGIN_TOKEN_SYNC_MAP: Record<string, string> = {
+  githubTokenRef: "GITHUB_PAT",
+};
+
+/**
+ * After a plugin config is saved, sync any raw token fields to the
+ * corresponding company secrets registry entry so agents can reach them.
+ * Failures are non-fatal — the config save already succeeded.
+ */
+async function syncPluginTokensToCompanySecrets(
+  db: Db,
+  configJson: Record<string, unknown>,
+): Promise<void> {
+  const companyId = typeof configJson.targetCompanyId === "string" ? configJson.targetCompanyId : null;
+  if (!companyId) return;
+
+  const svc = secretService(db);
+
+  for (const [field, secretName] of Object.entries(PLUGIN_TOKEN_SYNC_MAP)) {
+    const value = configJson[field];
+    if (typeof value !== "string" || value.trim().length === 0) continue;
+    // Skip if it's already a UUID secret ref (not a raw token).
+    if (UUID_RE.test(value.trim())) continue;
+
+    try {
+      const existing = await svc.getByName(companyId, secretName);
+      if (existing) {
+        await svc.rotate(existing.id, { value: value.trim() });
+      } else {
+        await svc.create(companyId, { name: secretName, provider: "local_encrypted", value: value.trim() });
+      }
+    } catch {
+      // Non-fatal: config is already persisted. Agent will pick up the
+      // new token on next run when the sync eventually succeeds.
+    }
+  }
+}
+
 export function pluginRoutes(
   db: Db,
   loader: ReturnType<typeof pluginLoader>,
@@ -1594,6 +1646,16 @@ export function pluginRoutes(
         pluginKey: plugin.pluginKey,
         configKeyCount: Object.keys(body.configJson).length,
       });
+
+      // Sync raw token fields to company secrets so agents can access them via
+      // standard secret_ref bindings. When a plugin config field holds a raw
+      // token (not a UUID secret ref) alongside a targetCompanyId, mirror it
+      // into the company's secrets registry under the canonical secret name.
+      // This prevents the dual-storage divergence where a user updates the
+      // plugin token but agents still see the stale company secret.
+      //
+      // Mapping: githubTokenRef → GITHUB_PAT (GitHub Integration plugin)
+      await syncPluginTokensToCompanySecrets(db, body.configJson);
 
       // Notify the running worker about the config change (PLUGIN_SPEC §25.4.4).
       // If the worker implements onConfigChanged, send the new config via RPC.
