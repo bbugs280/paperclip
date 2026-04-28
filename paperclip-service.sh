@@ -9,6 +9,9 @@ if [[ "$1" == "pause" ]]; then
   
 elif [[ "$1" == "resume" ]]; then
   echo "▶️  Resuming Paperclip autostart service..."
+  echo "🧹 Cleaning up stuck processes and ports..."
+  pkill -9 -f "pnpm dev" 2>/dev/null
+  sleep 2
   launchctl load ~/Library/LaunchAgents/com.paperclip.service.plist 2>/dev/null
   echo "✅ Service resumed. Will restart on reboot."
   
