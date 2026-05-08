@@ -9,6 +9,15 @@ export default defineConfig({
     },
   },
   test: {
-    environment: "node",
+    environment: "jsdom",
+    environmentOptions: {
+      jsdom: {
+        url: "http://localhost",
+      },
+    },
+    setupFiles: ["./src/test-setup.ts"],
+    environmentMatchGlobs: [
+      ["**/*.test.ts", "node"],
+    ],
   },
 });

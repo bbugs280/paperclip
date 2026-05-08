@@ -67,11 +67,21 @@ export async function prepareOpenCodeRuntimeConfig(input: {
   const existingPermission = isPlainObject(existingConfig.permission)
     ? existingConfig.permission
     : {};
+  const existingTools = isPlainObject(existingConfig.tools) ? existingConfig.tools : {};
   const nextConfig = {
     ...existingConfig,
     permission: {
       ...existingPermission,
       external_directory: "allow",
+    },
+    // Disable the opencode `task` tool system-wide. The `task` tool spawns inline
+    // sub-agents locally inside the current session. This is problematic for
+    // orchestrator agents (e.g. Director) that should delegate work by creating
+    // real Paperclip issues via the API — not by running work inline. Disabling
+    // it forces agents to use the correct delegation path every time.
+    tools: {
+      ...existingTools,
+      task: false,
     },
   };
   await fs.writeFile(runtimeConfigPath, `${JSON.stringify(nextConfig, null, 2)}\n`, "utf8");

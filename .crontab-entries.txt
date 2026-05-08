@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Crontab entries for Paperclip backup automation
+# Usage: Copy these lines into `crontab -e`
+
+# ═══════════════════════════════════════════════════════════════
+# DAILY BACKUPS (2 AM, keep 7 days)
+# ═══════════════════════════════════════════════════════════════
+0 2 * * * cd /Users/home/paperclip && ./scripts/backup-non-git-data.sh ~/.paperclip/daily-backups >/dev/null 2>&1
+
+# Clean old daily backups (keep 7 days)
+30 2 * * * cd /Users/home/paperclip && ./scripts/backup-housekeeping.sh --execute >/dev/null 2>&1
+
+# ═══════════════════════════════════════════════════════════════
+# WEEKLY BACKUPS (Sunday 3 AM, keep 30 days)
+# ═══════════════════════════════════════════════════════════════
+0 3 * * 0 cd /Users/home/paperclip && ./scripts/backup-non-git-data.sh ~/.paperclip/weekly-backups >/dev/null 2>&1
+
+# Clean old weekly backups (keep 30 days)
+30 3 * * 0 cd /Users/home/paperclip && ./scripts/backup-housekeeping.sh --execute >/dev/null 2>&1
+
+# ═══════════════════════════════════════════════════════════════
+# WEEKLY REPORT (Sunday 4 AM - email optional)
+# ═══════════════════════════════════════════════════════════════
+0 4 * * 0 cd /Users/home/paperclip && ./scripts/backup-housekeeping.sh --dry-run 2>&1 | mail -s "Paperclip Backup Report" your-email@example.com 2>/dev/null || true
+
+# ═══════════════════════════════════════════════════════════════
+# HOW TO INSTALL
+# ═══════════════════════════════════════════════════════════════
+#
+# 1. Open crontab editor:
+#    crontab -e
+#
+# 2. Copy-paste the sections above (minus these comments)
+#
+# 3. Verify installation:
+#    crontab -l
+#
+# 4. Monitor execution:
+#    log stream --predicate 'process == "cron"' --level debug
+#
+# ═══════════════════════════════════════════════════════════════

@@ -338,12 +338,15 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
   // System-wise fix for bash tool workdir validation: ensure Cursor always provides
   // a valid working directory when calling bash tools. This prevents schema validation
   // errors where workdir is required but explicitly set to null.
+  // Also fix for bash tool description validation: opencode 1.14+ requires description
+  // to be a non-null string; omitting it causes "invalid_type: expected string, received undefined".
   const bashToolWorkdirInstruction =
-    `## Bash Tool Working Directory\n` +
-    `When using the bash tool, ALWAYS include a workdir parameter set to the current working directory. ` +
-    `The current working directory for this execution is: **${cwd}**\n` +
-    `Example: when calling bash, use workdir: "${cwd}" (or omit workdir entirely to let the bash tool use the default, ` +
-    `but never pass workdir: null or workdir: undefined).\n\n`;
+    `## Bash Tool Required Parameters\n` +
+    `When using the bash tool, ALWAYS include BOTH of these parameters:\n` +
+    `1. **description** (required string): a short plain-English description of what the command does. Example: "List files in current directory". Never omit description or pass null/undefined.\n` +
+    `2. **workdir** (required string): set to the current working directory. The current working directory for this execution is: **${cwd}**\n` +
+    `Example bash call: { "command": "ls -la", "description": "List files", "workdir": "${cwd}" }\n` +
+    `Never pass description: null, description: undefined, workdir: null, or workdir: undefined.\n\n`;
   instructionsPrefix += bashToolWorkdirInstruction;
   instructionsChars = instructionsPrefix.length;
 

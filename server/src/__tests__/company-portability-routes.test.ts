@@ -47,6 +47,12 @@ function registerServiceMocks() {
     companyPortabilityService: () => mockCompanyPortabilityService,
     companyService: () => mockCompanyService,
     feedbackService: () => mockFeedbackService,
+    companySharedInstructionsService: () => ({
+      getBundle: vi.fn(),
+      readFile: vi.fn(),
+      writeFile: vi.fn(),
+      deleteFile: vi.fn(),
+    }),
     logActivity: mockLogActivity,
   }));
 }

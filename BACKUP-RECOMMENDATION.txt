@@ -1,0 +1,157 @@
+╔═══════════════════════════════════════════════════════════════════════════════╗
+║         PAPERCLIP NON-GIT DATA BACKUP RECOMMENDATION                          ║
+║                                                                               ║
+║  Concern: Accidental AI corruption of company data, scripts, and database    ║
+║  Solution: Point-in-time snapshots with rapid recovery                       ║
+╚═══════════════════════════════════════════════════════════════════════════════╝
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📋 WHAT TO BACKUP (All Outside Git)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+PRIORITY | COMPONENT           | SIZE     | IMPACT               | AI RISK
+─────────┼─────────────────────┼──────────┼──────────────────────┼──────────
+CRITICAL│ Secrets (master.key)│ < 1 KB   │ Decrypt all data     │ Low (rarely touched)
+CRITICAL│ Database            │ 226 MB   │ All app state        │ HIGH (agents modify)
+HIGH    │ Company state       │ 528 KB   │ Instructions/scripts │ CRITICAL (written by AI)
+HIGH    │ File storage (data/)│ 5.2 GB   │ User uploads, exports│ HIGH (AI-generated)
+MEDIUM  │ Config (.env files) │ < 10 KB  │ Adapter settings     │ Low
+MEDIUM  │ Projects            │ 4.7 MB   │ Project metadata     │ Low
+LOW     │ Workspaces          │ 208 KB   │ Workspace state      │ Low
+LOW     │ Custom plugins      │ ~500KB   │ Extensions           │ Low
+
+TOTAL UNCOMPRESSED: ~5.5 GB
+TOTAL COMPRESSED:   ~1.5-2.0 GB per backup
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🎯 RECOMMENDED STRATEGY: Daily + Weekly Retention
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+TIER  | FREQUENCY  | RETENTION  | DISK/MONTH | COST          | WHEN TO USE
+──────┼────────────┼────────────┼────────────┼───────────────┼─────────────────────
+Daily │ 2 AM daily │ 7 days     │ ~10 GB     │ Minimal       │ Normal operations
+      │            │            │            │               │ (catchmost corruption)
+─────┼────────────┼────────────┼────────────┼───────────────┼────────────────────
+Weekly│ Sunday 3AM │ 30 days    │ ~6 GB      │ Minimal       │ Keep monthly
+      │            │            │            │               │ for compliance
+─────┼────────────┼────────────┼────────────┼───────────────┼────────────────────
+Ad-hoc│ Before big │ Manual     │ On-demand  │ 1.5 GB per    │ Critical agent runs
+      │ agent work │            │            │               │ (Pre-save snapshot)
+
+TOTAL MONTHLY DISK: ~15 GB (negligible on modern systems)
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+⚡ QUICK START: 5-Minute Setup
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1: Test backup script
+───────────────────────────
+$ cd /Users/home/paperclip
+$ ./scripts/backup-non-git-data.sh
+
+Expected output:
+  ✓ Backup complete!
+  ✓ Location: .backups/paperclip-YYYYMMDD-HHMMSS/
+  ✓ Size: ~1.5 GB
+
+Step 2: Set up daily automated backups + housekeeping
+──────────────────────────────────────────────────────
+$ crontab -e
+
+Add these lines:
+
+# Backup at 2 AM daily
+0 2 * * * cd /Users/home/paperclip && ./scripts/backup-non-git-data.sh ~/.paperclip/daily-backups >/dev/null 2>&1
+
+# Cleanup old daily backups (keep 7 days) at 2:30 AM
+30 2 * * * cd /Users/home/paperclip && ./scripts/backup-housekeeping.sh --execute >/dev/null 2>&1
+
+# Backup at 3 AM on Sundays
+0 3 * * 0 cd /Users/home/paperclip && ./scripts/backup-non-git-data.sh ~/.paperclip/weekly-backups >/dev/null 2>&1
+
+# Cleanup old weekly backups (keep 30 days) at 3:30 AM Sundays
+30 3 * * 0 cd /Users/home/paperclip && ./scripts/backup-housekeeping.sh --execute >/dev/null 2>&1
+
+Step 3: Verify cron is configured
+──────────────────────────────────
+$ crontab -l
+
+Should show 4 new lines (backup + cleanup for daily and weekly)
+
+Step 4: Test housekeeping (dry-run first)
+──────────────────────────────────────────
+$ ./scripts/backup-housekeeping.sh --dry-run
+
+# Preview what will be deleted
+
+$ ./scripts/backup-housekeeping.sh --execute
+
+# Actually delete old backups
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+🚨 RESTORE IF CORRUPTION DETECTED
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Step 1: Stop Paperclip
+$ pkill -f paperclip
+
+Step 2: Restore from most recent backup before corruption
+$ ls -lrt ~/.paperclip/daily-backups/  # Find backup
+$ ./scripts/restore-non-git-data.sh ~/.paperclip/daily-backups/paperclip-YYYYMMDD-HHMMSS/
+
+Step 3: Verify and restart
+$ pnpm dev
+$ curl http://localhost:3100/api/health
+
+⏱ TOTAL RECOVERY TIME: 10-15 minutes
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📂 CREATED SCRIPTS & DOCS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+✅ ./scripts/backup-non-git-data.sh     Comprehensive backup (all non-git data)
+✅ ./scripts/restore-non-git-data.sh    Safe restore with verification
+✅ ./scripts/backup-housekeeping.sh     Clean up old backups (automatic retention)
+✅ ./.crontab-entries.txt               Ready-to-copy crontab lines
+✅ ./doc/NON-GIT-BACKUP-GUIDE.md        Full reference guide
+
+Usage:
+  ./scripts/backup-non-git-data.sh                      # Single backup
+  ./scripts/restore-non-git-data.sh .backups/paperclip-*/ # Restore
+  ./scripts/backup-housekeeping.sh --dry-run            # Preview cleanup
+  ./scripts/backup-housekeeping.sh --execute            # Actually cleanup
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+💡 WHY THIS WORKS (For AI-Corruption Protection)
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+Time Machine:
+  ✓ Protects against accidental deletion
+  ✗ Doesn't give you comparison before/after
+  ✗ Recovery takes time to browse snapshots
+
+Daily Backups:
+  ✓ Automated, no manual work
+  ✓ Compare yesterday's state with today
+  ✓ Quick recovery (know exact backup location)
+  ✓ Catch AI mistakes within hours
+  ✓ Combined with Time Machine = defense in depth
+
+Before Critical Agent Runs:
+  ✓ Ad-hoc snapshot before risky operations
+  ✓ Atomic before/after comparison
+  ✓ Same-day recovery if something goes wrong
+
+Result: Multiple overlapping layers of protection
+
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+📖 NEXT STEPS
+━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+1. Read: ./doc/NON-GIT-BACKUP-GUIDE.md (comprehensive reference)
+2. Test: ./scripts/backup-non-git-data.sh (verify it works)
+3. Setup: Add 2 lines to crontab (5 minutes)
+4. Done: Automated daily + weekly backups
+
+Questions? See doc/NON-GIT-BACKUP-GUIDE.md or review the scripts directly.
+
